@@ -1,0 +1,47 @@
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+*.egg
+.venv/
+venv/
+env/
+
+# ===== 敏感配置文件（含 API Key / AK/SK）=====
+backend/secrets.json
+backend/providers.json
+backend/settings.json
+backend/minio_config.json
+backend/notification.json
+
+# ===== 用户数据 =====
+data/session/
+data/memory/
+data/covers/
+data/lyrics/
+data/temp/
+data/minio_index.json
+data/tasks.json
+
+# ===== 测试/调试临时文件 =====
+mcp_test_output.txt
+test_output.json
+err.txt
+
+# ===== API 文档参考（外部文档，不上传）=====
+qwqw/
+
+# ===== IDE / 编辑器 =====
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ===== OS =====
+.DS_Store
+Thumbs.db
+desktop.ini

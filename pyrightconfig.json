@@ -1,0 +1,11 @@
+{
+    "include": ["backend"],
+    "executionEnvironments": [
+        {
+            "root": ".",
+            "extraPaths": ["."]
+        }
+    ],
+    "pythonVersion": "3.12",
+    "typeCheckingMode": "basic"
+}

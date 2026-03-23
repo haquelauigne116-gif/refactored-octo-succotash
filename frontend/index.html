@@ -1,0 +1,1885 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <title>小鱼秘书 (XiaoYu UI)</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <!-- Marked.js for Markdown rendering -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <!-- KaTeX for LaTeX formula rendering -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+</head>
+
+<body>
+
+    <div class="sidebar">
+        <div class="sidebar-header"><span>☰</span><span>🔍</span></div>
+        <div class="menu-list">
+            <div class="menu-item active" onclick="toggleSubMenu(); switchView('chat')"><span>会话</span> <span>˅</span>
+            </div>
+            <div class="sub-menu open" id="session-list">
+                <div class="sub-menu-item new-session-btn" onclick="createNewSession()">＋ 新建会话</div>
+                <!-- 会话列表将通过 JS 动态加载 -->
+            </div>
+            <div class="menu-item" onclick="switchView('task')">任务 📋</div>
+            <div class="menu-item" onclick="switchView('files')">文件 📁</div>
+            <div class="menu-item" onclick="switchView('music')">音乐 🎵</div>
+            <div class="menu-item" onclick="switchView('settings')">设置 ⚙️</div>
+        </div>
+    </div>
+
+    <div class="main-content">
+        <div id="chat-view" class="view-container active">
+            <div class="chat-header">小鱼秘书对话</div>
+            <div class="chat-history" id="chat-history">
+                <div class="msg-bubble ai-msg">你好，我是小鱼！今天需要处理什么工作？</div>
+            </div>
+            <div class="input-area">
+                <div class="input-box">
+                    <div id="chat-attach-preview" style="display:none; padding:4px 0; gap:6px; flex-wrap:wrap;"></div>
+                    <textarea class="textarea" id="user-input" placeholder="输入你想说的话 (按回车发送)..."
+                        onkeypress="handleEnter(event)"></textarea>
+                    <div class="controls">
+                        <label class="btn-icon" for="chat-file-input" title="添加图片/文件" style="cursor:pointer;">📎</label>
+                        <input type="file" id="chat-file-input" accept="image/*,.pdf,.doc,.docx,.txt,.md,.csv,.xls,.xlsx" multiple style="display:none;" onchange="handleChatFileSelect(event)">
+                        <span id="current-model-label" style="font-size:12px; color:#94a3b8; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:120px;" title="在设置中切换模型"></span>
+                        <button class="btn-send" id="send-btn" onclick="sendMessage()">发送</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="task-view" class="view-container">
+            <div class="task-header">
+                <span>任务看板 📋</span>
+                <button class="btn-send" onclick="openTaskModal()" style="font-size: 14px;">＋ 新建定时任务</button>
+            </div>
+            <div class="task-grid" id="task-grid">
+                <!-- 任务卡片通过 JS 动态加载 -->
+            </div>
+        </div>
+
+        <!-- 文件管理面板 -->
+        <div id="files-view" class="view-container">
+            <div class="task-header">
+                <span>文件管理 📁</span>
+            </div>
+            <div class="files-content">
+                <!-- 上传区 -->
+                <div class="file-upload-zone" id="file-upload-zone"
+                     ondragover="event.preventDefault(); this.classList.add('drag-over');"
+                     ondragleave="this.classList.remove('drag-over');"
+                     ondrop="handleFileDrop(event)">
+                    <div class="upload-icon">☁️</div>
+                    <div class="upload-text">拖拽文件到这里，或 <label class="upload-link" for="file-input-hidden">点击选择</label></div>
+                    <input type="file" id="file-input-hidden" style="display:none;" onchange="handleFileSelect(event)" multiple>
+                </div>
+                <div class="file-desc-row" id="file-desc-row" style="display:none;">
+                    <span class="file-selected-name" id="file-selected-name"></span>
+                    <input type="text" id="file-description" class="settings-input" placeholder="给文件加一句描述（AI 会自动打标签）">
+                    <button class="btn-send" id="file-upload-btn" onclick="uploadFile()">🚀 上传</button>
+                </div>
+
+                <!-- 搜索栏 -->
+                <div class="file-search-bar" style="display: flex; gap: 10px;">
+                    <input type="text" id="file-search-input" class="settings-input" style="flex: 1;" placeholder="🔍 搜索文件（根据文件名/描述过滤，支持点击右侧AI语义检索）" oninput="searchFiles()">
+                    <button class="btn-music-generate" id="btn-file-ai-search" onclick="aiSearchFiles()" style="flex-shrink: 0; padding: 0 15px; border-radius: 8px;">✨ AI 语义过滤</button>
+                </div>
+
+                <!-- 文件卡片网格 -->
+                <div class="file-grid" id="file-grid">
+                    <!-- 动态生成 -->
+                </div>
+            </div>
+        </div>
+
+        <!-- 音乐面板 -->
+        <div id="music-view" class="view-container">
+            <div class="task-header">
+                <span>音乐播放器 🎵</span>
+            </div>
+            <div class="music-content" style="flex-direction:row; gap:0; padding:0;">
+                <!-- 左侧：搜索/浏览 -->
+                <div class="music-panel music-panel-left">
+                    <div class="music-panel-header">
+                        <span style="font-weight:600;">🔍 搜索音乐</span>
+                    </div>
+                    <div class="music-search-bar">
+                        <div class="music-search-modes">
+                            <button class="search-mode-btn active" data-mode="name" onclick="setSearchMode('name')">🔤 搜名字</button>
+                            <button class="search-mode-btn" data-mode="ai" onclick="setSearchMode('ai')">✨ AI推荐</button>
+                            <button class="search-mode-btn" data-mode="tag" onclick="setSearchMode('tag')">🏷️ 搜标签</button>
+                        </div>
+                        <div class="music-search-input-row">
+                            <input type="text" id="music-search-input" class="settings-input" placeholder="输入歌曲名称..."
+                                onkeypress="if(event.key==='Enter')doMusicSearch()">
+                            <button class="btn-send" style="padding:6px 14px; font-size:13px;" onclick="doMusicSearch()">搜索</button>
+                        </div>
+                    </div>
+                    <div class="music-browse-list" id="music-browse-list">
+                        <div class="song-list-empty">🎵 输入关键词搜索音乐<br>或切换模式浏览</div>
+                    </div>
+                </div>
+                <!-- 右侧：播放队列 -->
+                <div class="music-panel music-panel-right">
+                    <div class="music-panel-header">
+                        <span style="font-weight:600;">📋 播放队列</span>
+                        <span id="queue-count" style="font-size:12px; color:#94a3b8;">0 首</span>
+                    </div>
+                    <div class="music-queue-list" id="music-queue-list">
+                        <div class="song-list-empty">🎵 从左侧添加歌曲到队列<br>歌单播完自动停止</div>
+                    </div>
+                    <div class="music-queue-actions" id="music-queue-actions" style="display:none;">
+                        <button class="btn-send" style="flex:1; justify-content:center; padding:6px; font-size:13px;" onclick="playQueue()">▶ 播放全部</button>
+                        <button class="btn-cancel" style="font-size:13px; padding:6px 12px;" onclick="clearQueue()">清空</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 全屏播放器（点击底部栏展开） -->
+            <div class="fullscreen-player" id="fullscreen-player">
+                <div class="fp-background" id="fp-background"></div>
+                <div class="fp-close-bar" onclick="closeFullscreenPlayer()">
+                    <span class="fp-close-arrow">⌄</span>
+                </div>
+                <div class="fp-body">
+                    <!-- 左侧封面 -->
+                    <div class="fp-cover-section">
+                        <div class="fp-vinyl-wrapper">
+                            <div class="fp-vinyl" id="fp-vinyl">
+                                <div class="fp-vinyl-inner">
+                                    <div class="fp-cover-img" id="fp-cover-img">🎵</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- 右侧歌词 -->
+                    <div class="fp-lyrics-section">
+                        <div class="fp-song-detail">
+                            <div class="fp-song-title" id="fp-song-title">未播放</div>
+                            <div class="fp-song-artist" id="fp-song-artist"></div>
+                        </div>
+                        <div class="fp-lyrics-scroll" id="fp-lyrics-scroll">
+                            <div class="fp-lyrics-content" id="fp-lyrics-content">
+                                <div class="lyrics-empty">暂无歌词</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <!-- 全屏播放器底部控制栏 -->
+                <div class="fp-controls">
+                    <div class="fp-progress-row">
+                        <span class="fp-time-current" id="fp-time-current">0:00</span>
+                        <div class="fp-progress-bar" id="fp-progress-bar" onclick="seekTo(event)">
+                            <div class="fp-progress-fill" id="fp-progress-fill"></div>
+                        </div>
+                        <span class="fp-time-total" id="fp-time-total">0:00</span>
+                    </div>
+                    <div class="fp-buttons">
+                        <button class="fp-btn" onclick="playPrev()" title="上一首">⏮</button>
+                        <button class="fp-btn fp-btn-play" id="fp-play-btn" onclick="togglePlay()" title="播放/暂停">▶</button>
+                        <button class="fp-btn" onclick="playNext()" title="下一首">⏭</button>
+                        <div class="fp-volume">
+                            <span class="fp-volume-icon" onclick="toggleMute()">🔊</span>
+                            <input type="range" class="fp-volume-slider" id="fp-volume" min="0" max="100" value="80" oninput="setVolume(this.value)">
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 底部迷你播放器 -->
+            <div class="music-player-bar" id="music-player-bar" style="display:none;" onclick="openFullscreenPlayer(event)">
+                <div class="player-progress-bar" id="player-progress-bar" onclick="seekTo(event)">
+                    <div class="player-progress-fill" id="player-progress-fill"></div>
+                </div>
+                <div class="player-main">
+                    <div class="player-song-info">
+                        <span class="player-song-icon">🎵</span>
+                        <div class="player-song-text">
+                            <div class="player-song-name" id="player-song-name">未播放</div>
+                            <div class="player-song-artist" id="player-song-artist"></div>
+                        </div>
+                    </div>
+                    <div class="player-controls" onclick="event.stopPropagation()">
+                        <button class="player-btn" onclick="playPrev()" title="上一首">⏮</button>
+                        <button class="player-btn player-btn-play" id="player-play-btn" onclick="togglePlay()" title="播放/暂停">▶</button>
+                        <button class="player-btn" onclick="playNext()" title="下一首">⏭</button>
+                    </div>
+                    <div class="player-right" onclick="event.stopPropagation()">
+                        <span class="player-time" id="player-time">0:00 / 0:00</span>
+                        <div class="player-volume">
+                            <span class="player-volume-icon" onclick="toggleMute()">🔊</span>
+                            <input type="range" class="player-volume-slider" id="player-volume" min="0" max="100" value="80" oninput="setVolume(this.value)">
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <audio id="audio-player" preload="auto"></audio>
+        </div>
+
+        <!-- 新建任务弹窗 -->
+        <div class="modal-overlay" id="task-modal" style="display:none;" onclick="closeTaskModal(event)">
+            <div class="modal-card" onclick="event.stopPropagation()">
+                <h3 style="margin-bottom: 18px;">🕐 新建定时任务</h3>
+                <div class="settings-form-row">
+                    <label>任务名称：</label>
+                    <input type="text" id="task-name-input" class="settings-input" placeholder="例如：每天喝水提醒">
+                </div>
+                <div class="settings-form-row">
+                    <label>触发类型：</label>
+                    <select id="trigger-type-select" class="settings-select" onchange="onTriggerTypeChange()">
+                        <option value="interval">间隔执行 (Interval)</option>
+                        <option value="cron">周期执行 (Cron)</option>
+                        <option value="date">一次性 (Date)</option>
+                    </select>
+                </div>
+
+                <!-- 间隔触发参数 -->
+                <div id="trigger-interval-fields" class="trigger-fields">
+                    <div class="settings-form-row">
+                        <label>间隔时间：</label>
+                        <input type="number" id="interval-value" class="settings-input" value="60" min="1" style="width:80px;">
+                        <select id="interval-unit" class="settings-select" style="width:100px; margin-left:8px;">
+                            <option value="seconds">秒</option>
+                            <option value="minutes" selected>分钟</option>
+                            <option value="hours">小时</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Cron 触发参数 -->
+                <div id="trigger-cron-fields" class="trigger-fields" style="display:none;">
+                    <div class="settings-form-row">
+                        <label>Cron 表达式：</label>
+                        <div style="flex:1;">
+                            <div style="display:flex; gap:8px; align-items:center;">
+                                <input type="text" id="cron-hour" class="settings-input" placeholder="时 (0-23)" style="width:80px;" value="9">
+                                <span>:</span>
+                                <input type="text" id="cron-minute" class="settings-input" placeholder="分 (0-59)" style="width:80px;" value="0">
+                            </div>
+                            <div style="display:flex; gap:8px; align-items:center; margin-top:8px;">
+                                <label style="min-width:auto; font-size:13px; color:#888;">星期：</label>
+                                <input type="text" id="cron-dow" class="settings-input" placeholder="0-6 或 mon-fri" style="width:150px;" value="mon-fri">
+                            </div>
+                            <p style="font-size:12px; color:#999; margin-top:6px;">示例: 时=9, 分=0, 星期=mon-fri → 周一到周五早上9:00</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 一次性触发参数 -->
+                <div id="trigger-date-fields" class="trigger-fields" style="display:none;">
+                    <div class="settings-form-row">
+                        <label>执行时间：</label>
+                        <input type="datetime-local" id="date-run-time" class="settings-input">
+                    </div>
+                </div>
+
+                <div class="settings-form-row" style="margin-top: 12px;">
+                    <label>AI 指令：</label>
+                    <textarea id="task-prompt-input" class="settings-input" rows="3"
+                        placeholder="告诉小鱼到时候要做什么，例如：请生成一段今日科技新闻早报"
+                        style="resize: vertical; font-family: inherit;"></textarea>
+                </div>
+
+                <div style="display:flex; gap:10px; margin-top:18px; justify-content:flex-end;">
+                    <button class="btn-cancel" onclick="document.getElementById('task-modal').style.display='none'">取消</button>
+                    <button class="btn-send" onclick="createTask()">创建任务</button>
+                </div>
+            </div>
+        </div>
+        
+        <div id="settings-view" class="view-container">
+            <div class="task-header">系统设置与帮助</div>
+            <div class="settings-content" style="padding: 20px; overflow-y: auto;">
+                
+                <div class="settings-card">
+                    <h3 style="margin-bottom: 10px;">🌟 RAG 知识库使用说明</h3>
+                    <p style="font-size: 14px; color: #555; line-height: 1.6;">
+                        1. <strong>什么是 RAG？</strong> 检索增强生成 (RAG) 允许 AI 在回答前，先去本地文件夹搜索相关文档，以便结合私有知识准确回答问题。<br>
+                        2. <strong>如何使用？</strong> 只需在项目根目录新建一个名为 <code>knowledge_base</code> 的文件夹，在里面放入 <code>.txt</code> 或 <code>.md</code> 文件即可。系统启动时会自动加载。<br>
+                        3. <strong>判断机制</strong>：当你在聊天框发送消息时，后台会先调用下方配置的<strong>判断模型</strong>来决定是否需要查询知识库。如果判断需要，则检索内容作为上下文附加给聊天模型。这样既省 Token 又能保证回答质量。
+                    </p>
+                </div>
+                
+                <div class="settings-card" style="margin-top: 20px;">
+                    <h3 style="margin-bottom: 15px;">🔑 API Key 配置</h3>
+                    <div id="api-keys-container">
+                        <!-- 动态生成的密钥输入框 -->
+                    </div>
+                    <div class="settings-form-row" style="margin-top:10px; padding-top:10px; border-top:1px dashed #e2e8f0;">
+                        <label style="width: 150px;">阿里云百炼 Key:</label>
+                        <input type="text" id="bailian-api-key" class="settings-input" placeholder="用于接入官方 MCP 服务 (画图/地图/搜索/语音)">
+                    </div>
+                </div>
+
+                <div class="settings-card" style="margin-top: 20px;">
+                    <h3 style="margin-bottom: 15px;">🧠 模型配置</h3>
+                    <div class="settings-form-row">
+                        <label>对话模型：</label>
+                        <select id="chat-model-select" class="settings-select" onchange="switchChatModel()"></select>
+                        <span style="font-size:12px;color:#888;margin-left:10px;">(主聊天使用的模型，切换即时生效)</span>
+                    </div>
+                    <div class="settings-form-row">
+                        <label>启用 MCP 服务：</label>
+                        <label style="display:flex; align-items:center; cursor:pointer;">
+                            <input type="checkbox" id="enable-mcp-checkbox" style="width:16px; height:16px; margin:0 8px 0 0;">
+                            <span style="font-size:13px; color:#555;">允许判断模型根据意图自动调用百炼外部工具</span>
+                        </label>
+                    </div>
+                    <div class="settings-form-row">
+                        <label>总结模型：</label>
+                        <select id="summary-model-select" class="settings-select"></select>
+                        <span style="font-size:12px;color:#888;margin-left:10px;">(用于生成会话标题和记忆提取)</span>
+                    </div>
+                    <div class="settings-form-row">
+                        <label>判断模型：</label>
+                        <select id="judge-model-select" class="settings-select"></select>
+                        <span style="font-size:12px;color:#888;margin-left:10px;">(用于判断是否触发RAG检索和意图分析)</span>
+                    </div>
+                </div>
+
+                <button class="btn-send" style="margin-top: 20px; width: 100%; justify-content: center;" onclick="saveSettings()">保存配置</button>
+                <div id="settings-msg" style="margin-top: 10px; text-align: center; color: #10b981; font-weight: bold; display: none;">配置已保存！</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast 弹窗容器 (右上角堆叠) -->
+    <div id="toast-container"></div>
+
+    <script>
+        const chatHistory = document.getElementById("chat-history");
+        const userInput = document.getElementById("user-input");
+        const sendBtn = document.getElementById("send-btn");
+        const API_BASE = window.location.origin;
+
+        function toggleSubMenu() { document.getElementById('session-list').classList.toggle('open'); }
+        function switchView(viewName) {
+            document.querySelectorAll('.view-container').forEach(v => v.classList.remove('active'));
+            document.querySelectorAll('.menu-item').forEach(m => m.classList.remove('active'));
+            document.getElementById(viewName + '-view').classList.add('active');
+            const menuItems = document.querySelectorAll('.menu-item');
+            const viewMap = { chat: 0, task: 1, files: 2, music: 3, settings: 4 };
+            if (viewMap[viewName] !== undefined) menuItems[viewMap[viewName]].classList.add('active');
+            if (viewName === 'task') loadTasks();
+            if (viewName === 'files') loadFiles();
+            if (viewName === 'settings') loadSettings();
+            if (viewName === 'music') loadMusic();
+        }
+
+        function handleEnter(event) {
+            if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                sendMessage();
+            }
+        }
+
+        // ====== 会话管理 ======
+
+        // ====== 模型切换和配置获取 ======
+        let systemSettingsData = null;
+        let globalProviders = [];
+
+        async function loadProviders() {
+            try {
+                const res = await fetch(API_BASE + "/providers");
+                const data = await res.json();
+                
+                globalProviders = data.providers;
+                currentChatProvider = data.current_provider;
+                currentChatModel = data.current_model;
+
+                // 更新输入框旁的模型标签
+                updateModelLabel();
+            } catch (e) {
+                console.error("加载模型列表失败:", e);
+            }
+        }
+
+        let currentChatProvider = '';
+        let currentChatModel = '';
+
+        function updateModelLabel() {
+            const label = document.getElementById('current-model-label');
+            if (!label) return;
+            let name = currentChatModel;
+            let caps = [];
+            globalProviders.forEach(p => {
+                p.models.forEach(m => {
+                    if (p.id === currentChatProvider && m.id === currentChatModel) {
+                        name = m.name;
+                        caps = m.caps || ['text'];
+                    }
+                });
+            });
+            const capsMap = {text:'文本', vision:'视觉', reasoning:'推理'};
+            const capsStr = caps.map(c => capsMap[c] || '').join(' ');
+            label.textContent = name + ' ' + capsStr;
+        }
+
+        async function loadSettings() {
+            try {
+                const res = await fetch(API_BASE + "/api/settings");
+                const data = await res.json();
+                systemSettingsData = data.settings;
+                
+                // 渲染 API Keys
+                const keysContainer = document.getElementById('api-keys-container');
+                keysContainer.innerHTML = '';
+                for (const [pid, pinfo] of Object.entries(data.providers_status)) {
+                    keysContainer.innerHTML += `
+                        <div class="settings-form-row">
+                            <label style="width: 150px;">${pinfo.name} Key:</label>
+                            <input type="text" id="apikey-${pid}" class="settings-input" placeholder="留空则不修改 (当前: ${pinfo.api_key_masked})">
+                        </div>
+                    `;
+                }
+                
+                // 渲染 MCP 配置
+                document.getElementById('bailian-api-key').placeholder = data.settings.bailian_api_key 
+                    ? `(已配置, 留空不修改)` 
+                    : `用于接入官方 MCP 服务 (画图/地图/搜索/语音)`;
+                document.getElementById('enable-mcp-checkbox').checked = !!data.settings.enable_mcp_for_chat;
+
+                // 填充所有模型选择器（对话/总结/判断）
+                const chatSelect = document.getElementById('chat-model-select');
+                const sumSelect = document.getElementById('summary-model-select');
+                const judgeSelect = document.getElementById('judge-model-select');
+                chatSelect.innerHTML = '';
+                sumSelect.innerHTML = '';
+                judgeSelect.innerHTML = '';
+                
+                globalProviders.forEach(p => {
+                    const makeGroup = () => { let g = document.createElement('optgroup'); g.label = p.name; return g; };
+                    const gc = makeGroup(), gs = makeGroup(), gj = makeGroup();
+                    p.models.forEach(m => {
+                        const capsMap = {text:'文本', vision:'视觉', reasoning:'推理'};
+                        const capsStr = (m.caps || ['text']).map(c => capsMap[c] || c).join(' ');
+                        const getOpt = () => { let o = document.createElement('option'); o.value = p.id+'|'+m.id; o.textContent = m.name + ' ' + capsStr; return o;};
+                        gc.appendChild(getOpt());
+                        gs.appendChild(getOpt());
+                        gj.appendChild(getOpt());
+                    });
+                    chatSelect.appendChild(gc);
+                    sumSelect.appendChild(gs);
+                    judgeSelect.appendChild(gj);
+                });
+
+                // 设置当前值
+                chatSelect.value = currentChatProvider + '|' + currentChatModel;
+                if(systemSettingsData.summary_model) {
+                    sumSelect.value = systemSettingsData.summary_provider + '|' + systemSettingsData.summary_model;
+                }
+                if(systemSettingsData.judge_model) {
+                    judgeSelect.value = systemSettingsData.judge_provider + '|' + systemSettingsData.judge_model;
+                }
+
+            } catch (err) {
+                console.error("加载设置失败", err);
+            }
+        }
+
+        async function saveSettings() {
+            const api_keys = {};
+            const keysContainer = document.getElementById('api-keys-container');
+            const inputs = keysContainer.querySelectorAll('input[type="text"]');
+            inputs.forEach(inp => {
+                const pid = inp.id.replace('apikey-', '');
+                api_keys[pid] = inp.value;
+            });
+
+            const sumVal = document.getElementById('summary-model-select').value.split('|');
+            const judVal = document.getElementById('judge-model-select').value.split('|');
+
+            const payload = {
+                api_keys: api_keys,
+                summary_provider: sumVal[0],
+                summary_model: sumVal[1],
+                judge_provider: judVal[0],
+                judge_model: judVal[1],
+                bailian_api_key: document.getElementById('bailian-api-key').value,
+                enable_mcp_for_chat: document.getElementById('enable-mcp-checkbox').checked
+            };
+
+            try {
+                await fetch(API_BASE + '/api/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                
+                const msg = document.getElementById('settings-msg');
+                msg.style.display = 'block';
+                setTimeout(() => msg.style.display = 'none', 3000);
+                
+                inputs.forEach(inp => inp.value = '');
+                document.getElementById('bailian-api-key').value = '';
+                loadSettings();
+                
+            } catch (err) {
+                alert('保存失败: ' + err);
+            }
+        }
+
+        async function switchChatModel() {
+            const select = document.getElementById('chat-model-select');
+            const val = select.value.split('|');
+            try {
+                const res = await fetch(API_BASE + '/switch_provider', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ provider_id: val[0], model_id: val[1] })
+                });
+                const data = await res.json();
+                if (data.status === 'ok') {
+                    currentChatProvider = val[0];
+                    currentChatModel = val[1];
+                    updateModelLabel();
+                }
+            } catch (e) {
+                console.error('切换模型失败:', e);
+            }
+        }
+
+        let pendingChatFiles = [];
+
+        function handleChatFileSelect(event) {
+            const files = event.target.files;
+            if (!files.length) return;
+            Array.from(files).slice(0, 4).forEach(f => pendingChatFiles.push(f));
+            renderAttachPreview();
+            event.target.value = ''; // 允许再次选择同一文件
+        }
+
+        function removePendingFile(idx) {
+            pendingChatFiles.splice(idx, 1);
+            renderAttachPreview();
+        }
+
+        function renderAttachPreview() {
+            const bar = document.getElementById('chat-attach-preview');
+            if (pendingChatFiles.length === 0) {
+                bar.style.display = 'none';
+                bar.innerHTML = '';
+                return;
+            }
+            bar.style.display = 'flex';
+            bar.innerHTML = '';
+            pendingChatFiles.forEach((f, i) => {
+                const isImage = f.type.startsWith('image/');
+                const wrap = document.createElement('div');
+                wrap.style.cssText = 'position:relative; display:inline-flex; align-items:center; gap:4px; background:#f1f5f9; border-radius:6px; border:1px solid #e2e8f0; padding:2px 4px;';
+                if (isImage) {
+                    const url = URL.createObjectURL(f);
+                    wrap.innerHTML = `<img src="${url}" style="width:40px; height:40px; object-fit:cover; border-radius:4px;">`;
+                } else {
+                    const icon = f.name.endsWith('.pdf') ? '📕' : '📄';
+                    wrap.innerHTML = `<span style="font-size:14px;">${icon}</span><span style="font-size:11px; max-width:80px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${f.name}</span>`;
+                }
+                const closeBtn = document.createElement('button');
+                closeBtn.textContent = '✕';
+                closeBtn.style.cssText = 'position:absolute; top:-4px; right:-4px; width:16px; height:16px; border-radius:50%; border:none; background:#ef4444; color:#fff; font-size:10px; cursor:pointer; line-height:16px; padding:0;';
+                closeBtn.onclick = () => removePendingFile(i);
+                wrap.appendChild(closeBtn);
+                bar.appendChild(wrap);
+            });
+        }
+
+        function fileToBase64(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => {
+                    const dataUrl = reader.result;
+                    const base64 = dataUrl.split(',')[1];
+                    resolve({ data: base64, mime: file.type || 'application/octet-stream', name: file.name });
+                };
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+            });
+        }
+
+        // 加载会话列表
+        async function loadSessions() {
+            try {
+                const res = await fetch(API_BASE + "/sessions");
+                const data = await res.json();
+                const sessionList = document.getElementById("session-list");
+
+                // 保留"新建会话"按钮，清除其他项
+                const newBtn = sessionList.querySelector('.new-session-btn');
+                sessionList.innerHTML = '';
+                sessionList.appendChild(newBtn);
+
+                // 添加历史会话
+                data.sessions.forEach(s => {
+                    const div = document.createElement("div");
+                    div.className = "sub-menu-item session-item" + (s.active ? " active-session" : "");
+                    div.textContent = s.name;
+                    div.onclick = () => switchSession(s.filename);
+                    sessionList.appendChild(div);
+                });
+            } catch (e) {
+                console.error("加载会话列表失败:", e);
+            }
+        }
+
+        // 新建会话
+        async function createNewSession() {
+            try {
+                const res = await fetch(API_BASE + "/new_session", { method: "POST" });
+                const data = await res.json();
+                if (data.status === "ok") {
+                    // 清空聊天区域
+                    chatHistory.innerHTML = '';
+                    loadSessions();  // 刷新列表
+                    switchView('chat');
+                }
+            } catch (e) {
+                appendMessage("❌ 新建会话失败", "system-msg");
+            }
+        }
+
+        // 切换到已有会话
+        async function switchSession(filename) {
+            try {
+                const res = await fetch(API_BASE + "/switch_session", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ filename: filename })
+                });
+                const data = await res.json();
+                if (data.status === "ok") {
+                    // 重建聊天界面
+                    chatHistory.innerHTML = '';
+                    if (data.messages.length === 0) {
+                        appendMessage("你好，我是小鱼！今天需要处理什么工作？", "ai-msg");
+                    } else {
+                        // 构建事件索引：按 after_msg_index 分组
+                        const eventsByIndex = {};
+                        if (data.events && data.events.length > 0) {
+                            data.events.forEach(evt => {
+                                const idx = evt.after_msg_index;
+                                if (!eventsByIndex[idx]) eventsByIndex[idx] = [];
+                                eventsByIndex[idx].push(evt);
+                            });
+                        }
+                        // 渲染消息，在正确位置插入事件卡片
+                        let msgIndex = 0;
+                        data.messages.forEach(msg => {
+                            if (msg.role === "user") {
+                                appendMessage(msg.content, "user-msg");
+                                msgIndex++;
+                            } else if (msg.role === "assistant") {
+                                let aiHtml = '';
+                                if (msg.thinking) {
+                                    aiHtml += renderThinkingBlock(msg.thinking, false);
+                                }
+                                aiHtml += renderMarkdown(msg.content);
+                                appendMessage(aiHtml, "ai-msg", true);
+                                msgIndex++;
+                            }
+                            // 在当前消息之后插入对应的事件卡片
+                            if (eventsByIndex[msgIndex]) {
+                                eventsByIndex[msgIndex].forEach(evt => {
+                                    if (evt.type === 'auto_task') {
+                                        appendMessage(renderAutoTaskCard(evt.data), "ai-msg event-msg");
+                                    } else if (evt.type === 'file_search') {
+                                        appendMessage(renderFileSearchCard(evt.data), "ai-msg event-msg");
+                                    } else if (evt.type === 'chat_attach') {
+                                        // 在对应的用户消息后追加附件预览
+                                        const files = evt.data.files || [];
+                                        if (files.length > 0) {
+                                            let html = '<div style="display:flex; gap:4px; flex-wrap:wrap;">';
+                                            files.forEach(f => {
+                                                if (f.mime && f.mime.startsWith('image/')) {
+                                                    html += `<img src="${API_BASE}${f.url}" style="max-width:120px; max-height:80px; border-radius:6px; border:1px solid #e2e8f0; cursor:pointer;" onclick="window.open('${API_BASE}${f.url}','_blank')">`;
+                                                } else {
+                                                    const icon = (f.original_name || '').endsWith('.pdf') ? '📕' : '📄';
+                                                    html += `<a href="${API_BASE}${f.url}" target="_blank" style="background:#f1f5f9; border:1px solid #e2e8f0; border-radius:4px; padding:2px 6px; font-size:11px; text-decoration:none; color:#334155;">${icon} ${f.original_name || f.filename}</a>`;
+                                                }
+                                            });
+                                            html += '</div>';
+                                            appendMessage(html, "user-msg attach-preview");
+                                        }
+                                    }
+                                });
+                            }
+                        });
+                    }
+                    loadSessions();  // 刷新高亮
+                    switchView('chat');
+                }
+            } catch (e) {
+                appendMessage("❌ 切换会话失败", "system-msg");
+            }
+        }
+
+        // ====== 聊天功能 ======
+
+        // 构建思考折叠块 HTML
+        function renderThinkingBlock(thinkingText, isOpen) {
+            const openAttr = isOpen ? ' open' : '';
+            return `<details class="thinking-block"${openAttr}><summary>💭 深度思考</summary><div class="thinking-content">${thinkingText.replace(/\n/g, '<br>')}</div></details>`;
+        }
+
+        // Markdown + LaTeX 渲染
+        function renderMarkdown(text) {
+            if (!text) return '';
+            try {
+                if (typeof marked !== 'undefined') {
+                    marked.setOptions({ breaks: true, gfm: true });
+                    return marked.parse(text);
+                }
+            } catch (e) {
+                console.warn('Markdown render error:', e);
+            }
+            return text.replace(/\n/g, '<br>');
+        }
+
+        // 对已渲染的 DOM 元素应用 KaTeX 公式渲染
+        function renderKaTeX(element) {
+            if (typeof renderMathInElement === 'undefined') return;
+            try {
+                renderMathInElement(element, {
+                    delimiters: [
+                        { left: '$$', right: '$$', display: true },
+                        { left: '$', right: '$', display: false },
+                        { left: '\\(', right: '\\)', display: false },
+                        { left: '\\[', right: '\\]', display: true }
+                    ],
+                    throwOnError: false
+                });
+            } catch (e) {
+                console.warn('KaTeX render error:', e);
+            }
+        }
+
+        async function sendMessage() {
+            const text = userInput.value.trim();
+            const hasFiles = pendingChatFiles.length > 0;
+            if (!text && !hasFiles) return;
+
+            // 构建用户消息气泡（含附件预览）
+            let bubbleHtml = text ? text.replace(/\n/g, '<br>') : '';
+            if (hasFiles) {
+                let attachHtml = '<div style="display:flex; gap:4px; flex-wrap:wrap; margin-top:6px;">';
+                pendingChatFiles.forEach(f => {
+                    if (f.type.startsWith('image/')) {
+                        const url = URL.createObjectURL(f);
+                        attachHtml += `<img src="${url}" style="max-width:120px; max-height:80px; border-radius:6px; border:1px solid #e2e8f0;">`;
+                    } else {
+                        const icon = f.name.endsWith('.pdf') ? '📕' : '📄';
+                        attachHtml += `<span style="background:#f1f5f9; border:1px solid #e2e8f0; border-radius:4px; padding:2px 6px; font-size:11px;">${icon} ${f.name}</span>`;
+                    }
+                });
+                attachHtml += '</div>';
+                bubbleHtml += attachHtml;
+            }
+            appendMessage(bubbleHtml, "user-msg");
+            userInput.value = "";
+
+            // 读取附件为 base64
+            let attachments = [];
+            if (hasFiles) {
+                try {
+                    attachments = await Promise.all(pendingChatFiles.map(f => fileToBase64(f)));
+                } catch (e) {
+                    console.error('读取文件失败:', e);
+                }
+            }
+            pendingChatFiles = [];
+            renderAttachPreview();
+
+            sendBtn.disabled = true;
+            sendBtn.innerText = "思考中...";
+
+            // 创建空 AI 回复气泡
+            const aiBubble = document.createElement("div");
+            aiBubble.className = "msg-bubble ai-msg streaming-cursor";
+            aiBubble.innerHTML = '';
+            chatHistory.appendChild(aiBubble);
+
+            let thinkingEl = null;  // <details> 元素
+            let thinkingContentEl = null;  // .thinking-content 元素
+            let replyEl = null;  // 正文容器
+            let hasThinking = false;
+
+            try {
+                const payload = { user_word: text || '' };
+                if (attachments.length > 0) payload.attachments = attachments;
+
+                const response = await fetch(API_BASE + "/chat", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload)
+                });
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop(); // 保留不完整行
+
+                    let eventType = '';
+                    for (const line of lines) {
+                        if (line.startsWith('event: ')) {
+                            eventType = line.slice(7).trim();
+                        } else if (line.startsWith('data: ') && eventType) {
+                            try {
+                                const data = JSON.parse(line.slice(6));
+
+                                if (eventType === 'thinking') {
+                                    if (!hasThinking) {
+                                        hasThinking = true;
+                                        thinkingEl = document.createElement('details');
+                                        thinkingEl.className = 'thinking-block';
+                                        thinkingEl.open = true;
+                                        thinkingEl.innerHTML = '<summary>💭 深度思考</summary><div class="thinking-content"></div>';
+                                        aiBubble.appendChild(thinkingEl);
+                                        thinkingContentEl = thinkingEl.querySelector('.thinking-content');
+                                        sendBtn.innerText = "思考中...";
+                                    }
+                                    thinkingContentEl.textContent += data.text;
+                                } else if (eventType === 'delta') {
+                                    if (!replyEl) {
+                                        replyEl = document.createElement('div');
+                                        aiBubble.appendChild(replyEl);
+                                        if (hasThinking && thinkingEl) thinkingEl.open = false;
+                                        sendBtn.innerText = "输出中...";
+                                    }
+                                    // 流式输出时先用纯文本, 完成后再渲染
+                                    replyEl.setAttribute('data-raw', (replyEl.getAttribute('data-raw') || '') + data.text);
+                                    replyEl.innerHTML = renderMarkdown(replyEl.getAttribute('data-raw'));
+                                } else if (eventType === 'replace_all') {
+                                    if (!replyEl) {
+                                        replyEl = document.createElement('div');
+                                        aiBubble.appendChild(replyEl);
+                                        if (hasThinking && thinkingEl) thinkingEl.open = false;
+                                        sendBtn.innerText = "输出中...";
+                                    }
+                                    // 整体替换目前积累的内容
+                                    replyEl.setAttribute('data-raw', data.text);
+                                    replyEl.innerHTML = renderMarkdown(replyEl.getAttribute('data-raw'));
+                                } else if (eventType === 'done') {
+                                    // 处理附加元数据
+                                    if (data.auto_task) {
+                                        appendMessage(renderAutoTaskCard(data.auto_task), "ai-msg event-msg");
+                                    }
+                                    if (data.file_search_result && data.file_search_result.files && data.file_search_result.files.length > 0) {
+                                        appendMessage(renderFileSearchCard(data.file_search_result), "ai-msg event-msg");
+                                    }
+                                } else if (eventType === 'error') {
+                                    aiBubble.innerHTML = `❌ <strong>AI 接口错误</strong><br>${data.message}`;
+                                }
+                            } catch (e) {
+                                console.warn('SSE parse error:', e, line);
+                            }
+                            eventType = '';
+                        }
+                    }
+                    chatHistory.scrollTop = chatHistory.scrollHeight;
+                }
+            } catch (error) {
+                aiBubble.innerHTML = "❌ 网络连接失败：请确保你的终端已经运行了 `uvicorn backend.server:app`！";
+                aiBubble.className = "msg-bubble system-msg";
+            } finally {
+                aiBubble.classList.remove('streaming-cursor');
+                // 流式完成后, 对整个气泡做最终渲染 (KaTeX 公式)
+                if (replyEl) {
+                    const rawText = replyEl.getAttribute('data-raw') || '';
+                    replyEl.innerHTML = renderMarkdown(rawText);
+                    renderKaTeX(replyEl);
+                }
+                sendBtn.disabled = false;
+                sendBtn.innerText = "发送";
+                chatHistory.scrollTop = chatHistory.scrollHeight;
+            }
+        }
+
+        // ====== 可复用的卡片渲染函数 ======
+
+        function renderAutoTaskCard(t) {
+            const triggerLabel = t.trigger_type === 'interval' ? '⏱ 间隔' :
+                                t.trigger_type === 'cron' ? '📅 周期' : '📌 一次性';
+            const triggerInfo = formatTriggerArgs(t.trigger_type, t.trigger_args);
+            return `<div class="auto-task-card">
+                <span class="auto-task-header">✅ 已创建任务</span>
+                <span class="auto-task-name">${t.task_name}</span>
+                <span class="auto-task-info">${triggerLabel} ${triggerInfo}</span>
+                <button class="task-btn task-btn-delete" style="margin-left:auto;" onclick="deleteTask('${t.task_id}'); this.closest('.auto-task-card').innerHTML='<span style=color:#999>✖ 已取消</span>'">取消</button>
+            </div>`;
+        }
+
+        function renderFileSearchCard(search_res) {
+            let fileCards = search_res.files.map(f => {
+                const icon = getFileIcon(f.content_type);
+                const size = formatSize(f.size || 0);
+                return `<a href="${f.download_url}" target="_blank" rel="noopener" style="border:1px solid #e8e8e8; padding:4px 6px; border-radius:4px; display:flex; align-items:center; gap:4px; background:#fff; text-decoration:none; color:inherit; min-width:0;">
+                    <span style="font-size:12px; flex-shrink:0;">${icon}</span>
+                    <div style="flex:1; min-width:0; overflow:hidden;">
+                        <div style="font-size:10px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:#333;">${f.original_name}</div>
+                        <div style="font-size:9px; color:#aaa;">${size}</div>
+                    </div>
+                </a>`;
+            }).join("");
+
+            return `<div class="auto-task-card" style="flex-direction:column; align-items:stretch; padding:6px 8px;">
+                <div style="font-size:11px; font-weight:600; color:#0078FF; margin-bottom:3px;">📁 找到 ${search_res.files.length} 个文件</div>
+                <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(100px, 1fr)); gap:3px; max-width:100%;">${fileCards}</div>
+            </div>`;
+        }
+
+        function appendMessage(text, className, skipEscape) {
+            const div = document.createElement("div");
+            div.className = "msg-bubble " + className;
+            if (skipEscape) {
+                div.innerHTML = text;  // 已经渲染过的 HTML
+            } else {
+                div.innerHTML = text.replace(/\n/g, '<br>');
+            }
+            chatHistory.appendChild(div);
+            // 对 AI 消息应用 KaTeX 公式渲染
+            if (className.includes('ai-msg')) {
+                renderKaTeX(div);
+            }
+            chatHistory.scrollTop = chatHistory.scrollHeight;
+        }
+
+        // 页面加载时获取会话列表和模型列表
+        loadProviders();
+        loadSessions();
+
+        // ====== 定时任务管理 ======
+
+        function openTaskModal() {
+            document.getElementById('task-modal').style.display = 'flex';
+            onTriggerTypeChange();
+        }
+
+        function closeTaskModal(event) {
+            if (event.target === document.getElementById('task-modal')) {
+                document.getElementById('task-modal').style.display = 'none';
+            }
+        }
+
+        function onTriggerTypeChange() {
+            const type = document.getElementById('trigger-type-select').value;
+            document.querySelectorAll('.trigger-fields').forEach(el => el.style.display = 'none');
+            document.getElementById('trigger-' + type + '-fields').style.display = 'block';
+        }
+
+        function buildTriggerArgs() {
+            const type = document.getElementById('trigger-type-select').value;
+            if (type === 'interval') {
+                const val = parseInt(document.getElementById('interval-value').value) || 60;
+                const unit = document.getElementById('interval-unit').value;
+                return { [unit]: val };
+            } else if (type === 'cron') {
+                const h = document.getElementById('cron-hour').value || '*';
+                const m = document.getElementById('cron-minute').value || '0';
+                const dow = document.getElementById('cron-dow').value || '*';
+                return { hour: h, minute: m, day_of_week: dow };
+            } else if (type === 'date') {
+                const dt = document.getElementById('date-run-time').value;
+                return { run_date: dt ? dt.replace('T', ' ') : '' };
+            }
+            return {};
+        }
+
+        async function createTask() {
+            const name = document.getElementById('task-name-input').value.trim();
+            const prompt = document.getElementById('task-prompt-input').value.trim();
+            if (!name) { alert('请输入任务名称'); return; }
+            if (!prompt) { alert('请输入 AI 指令'); return; }
+
+            const payload = {
+                task_name: name,
+                trigger_type: document.getElementById('trigger-type-select').value,
+                trigger_args: buildTriggerArgs(),
+                action_prompt: prompt,
+            };
+
+            try {
+                const res = await fetch(API_BASE + '/api/tasks', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                if (data.status === 'ok') {
+                    document.getElementById('task-modal').style.display = 'none';
+                    document.getElementById('task-name-input').value = '';
+                    document.getElementById('task-prompt-input').value = '';
+                    loadTasks();
+                } else {
+                    alert('创建失败: ' + JSON.stringify(data));
+                }
+            } catch (e) {
+                alert('网络错误: ' + e);
+            }
+        }
+
+        async function loadTasks() {
+            try {
+                const res = await fetch(API_BASE + '/api/tasks');
+                const data = await res.json();
+                renderTaskCards(data.tasks || []);
+            } catch (e) {
+                console.error('加载任务失败:', e);
+            }
+        }
+
+        function renderTaskCards(tasks) {
+            const grid = document.getElementById('task-grid');
+            grid.innerHTML = '';
+
+            if (tasks.length === 0) {
+                grid.innerHTML = '<div style="grid-column: 1/-1; text-align:center; color:#999; padding:40px; font-size:16px;">暂无定时任务，点击上方按钮创建一个吧 ✨</div>';
+                return;
+            }
+
+            tasks.forEach(task => {
+                const statusClass = task.status === 'running' ? 'badge-running' :
+                                    task.status === 'paused' ? 'badge-paused' : 'badge-completed';
+                const statusText = task.status === 'running' ? '▶ 运行中' :
+                                   task.status === 'paused' ? '⏸ 已暂停' : '✅ 已完成';
+
+                const triggerLabel = task.trigger_type === 'interval' ? '⏱ 间隔' :
+                                    task.trigger_type === 'cron' ? '📅 周期' : '📌 一次性';
+                const triggerDetail = formatTriggerArgs(task.trigger_type, task.trigger_args);
+
+                const lastRunHtml = task.last_run
+                    ? `<div class="task-meta">🕐 上次运行: ${task.last_run}</div>`
+                    : `<div class="task-meta">🕐 尚未执行</div>`;
+
+                const resultHtml = task.last_result
+                    ? `<div class="task-result">${task.last_result.substring(0, 120)}${task.last_result.length > 120 ? '...' : ''}</div>`
+                    : '';
+
+                const pauseBtn = task.status === 'running'
+                    ? `<button class="task-btn task-btn-pause" onclick="pauseTask('${task.task_id}')">⏸ 暂停</button>`
+                    : task.status === 'paused'
+                    ? `<button class="task-btn task-btn-resume" onclick="resumeTask('${task.task_id}')">▶ 恢复</button>`
+                    : '';
+
+                const card = document.createElement('div');
+                card.className = 'task-card';
+                card.innerHTML = `
+                    <div class="task-card-header">
+                        <span class="task-card-title">${task.task_name}</span>
+                        <span class="task-badge ${statusClass}">${statusText}</span>
+                    </div>
+                    <div class="task-meta">${triggerLabel} ${triggerDetail}</div>
+                    <div class="task-meta" style="color:#666; font-size:12px; margin-top:4px;">📝 ${task.action_prompt.substring(0, 60)}${task.action_prompt.length > 60 ? '...' : ''}</div>
+                    ${lastRunHtml}
+                    ${resultHtml}
+                    <div class="task-actions">
+                        ${pauseBtn}
+                        <button class="task-btn task-btn-delete" onclick="deleteTask('${task.task_id}')">🗑 删除</button>
+                    </div>
+                `;
+                grid.appendChild(card);
+            });
+        }
+
+        function formatTriggerArgs(type, args) {
+            if (type === 'interval') {
+                if (args.seconds) return `每 ${args.seconds} 秒`;
+                if (args.minutes) return `每 ${args.minutes} 分钟`;
+                if (args.hours) return `每 ${args.hours} 小时`;
+                return JSON.stringify(args);
+            } else if (type === 'cron') {
+                const h = args.hour || '*';
+                const m = args.minute || '0';
+                const dow = args.day_of_week || '*';
+                return `${h}:${String(m).padStart(2, '0')} (${dow})`;
+            } else if (type === 'date') {
+                return args.run_date || '未设置';
+            }
+            return JSON.stringify(args);
+        }
+
+        async function pauseTask(taskId) {
+            try {
+                await fetch(API_BASE + `/api/tasks/${taskId}/pause`, { method: 'POST' });
+                loadTasks();
+            } catch (e) { alert('暂停失败: ' + e); }
+        }
+
+        async function resumeTask(taskId) {
+            try {
+                await fetch(API_BASE + `/api/tasks/${taskId}/resume`, { method: 'POST' });
+                loadTasks();
+            } catch (e) { alert('恢复失败: ' + e); }
+        }
+
+        async function deleteTask(taskId) {
+            if (!confirm('确定要删除这个任务吗？')) return;
+            try {
+                await fetch(API_BASE + `/api/tasks/${taskId}`, { method: 'DELETE' });
+                loadTasks();
+            } catch (e) { alert('删除失败: ' + e); }
+        }
+
+        // ====== WebSocket 实时推送 + Toast 弹窗 ======
+
+        let ws = null;
+        let wsReconnectDelay = 1000;  // 初始重连延迟 1s
+        const WS_MAX_DELAY = 30000;   // 最大重连延迟 30s
+        let wsHeartbeatTimer = null;
+
+        function connectWebSocket() {
+            const wsUrl = 'ws://' + window.location.host + '/ws';
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = () => {
+                console.log('[WS] 连接成功');
+                wsReconnectDelay = 1000;  // 重置退避计时器
+                // 心跳检测：每 25 秒发一次 ping
+                clearInterval(wsHeartbeatTimer);
+                wsHeartbeatTimer = setInterval(() => {
+                    if (ws && ws.readyState === WebSocket.OPEN) {
+                        ws.send('ping');
+                    }
+                }, 25000);
+            };
+
+            ws.onmessage = (event) => {
+                if (event.data === 'pong') return;  // 心跳响应忽略
+                try {
+                    const data = JSON.parse(event.data);
+                    if (data.type === 'task_result') {
+                        showToast(data);
+                        // 如果当前在任务看板，刷新卡片
+                        if (document.getElementById('task-view').classList.contains('active')) {
+                            loadTasks();
+                        }
+                    } else if (data.type === 'task_created') {
+                        showToast({
+                            task_name: data.task.task_name,
+                            result: '✅ 已自动创建新定时任务',
+                            time: data.task.created_at || '',
+                        });
+                        if (document.getElementById('task-view').classList.contains('active')) {
+                            loadTasks();
+                        }
+                    } else if (data.type === 'file_tags_ready') {
+                        // 异步标签生成完成 — 更新文件卡片
+                        const tagMsg = data.tags && data.tags.length > 0
+                            ? `标签: ${data.tags.join(', ')}`
+                            : (data.error ? `标签生成失败: ${data.error}` : '无标签');
+                        showToast({
+                            task_name: '🏷️ 标签就绪',
+                            result: `${data.original_name}\n${tagMsg}`,
+                            time: '',
+                        });
+                        // 如果当前在文件管理页，刷新列表
+                        if (document.getElementById('files-view').classList.contains('active')) {
+                            loadFiles();
+                        }
+                        // 如果在音乐页，也刷新（标签可能影响音乐列表）
+                        if (document.getElementById('music-view').classList.contains('active')) {
+                            loadMusic();
+                        }
+                    }
+                } catch (e) {
+                    console.warn('[WS] 解析消息失败', e);
+                }
+            };
+
+            ws.onclose = () => {
+                console.log(`[WS] 连接关闭，${wsReconnectDelay / 1000}s 后重连...`);
+                clearInterval(wsHeartbeatTimer);
+                // 指数退避重连
+                setTimeout(() => {
+                    wsReconnectDelay = Math.min(wsReconnectDelay * 2, WS_MAX_DELAY);
+                    connectWebSocket();
+                }, wsReconnectDelay);
+            };
+
+            ws.onerror = (err) => {
+                console.error('[WS] 错误', err);
+                ws.close();  // 触发 onclose 重连
+            };
+        }
+
+        function showToast(data) {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            toast.className = 'toast-item toast-enter';
+
+            const isError = data.result && data.result.startsWith('❌');
+            toast.innerHTML = `
+                <div class="toast-header">
+                    <span class="toast-icon">${isError ? '❌' : '🔔'}</span>
+                    <span class="toast-title">${data.task_name}</span>
+                    <span class="toast-time">${data.time}</span>
+                    <button class="toast-close" onclick="this.closest('.toast-item').remove()">×</button>
+                </div>
+                <div class="toast-body">${data.result.substring(0, 150).replace(/\n/g, '<br>')}${data.result.length > 150 ? '...' : ''}</div>
+            `;
+
+            container.appendChild(toast);
+
+            // 动画进入
+            requestAnimationFrame(() => toast.classList.remove('toast-enter'));
+
+            // 8 秒后自动淡出并移除 DOM
+            setTimeout(() => {
+                toast.classList.add('toast-exit');
+                toast.addEventListener('animationend', () => toast.remove());
+            }, 8000);
+
+            // 最多显示 5 个 toast，超出时移除最早的
+            const toasts = container.querySelectorAll('.toast-item');
+            if (toasts.length > 5) {
+                toasts[0].remove();
+            }
+        }
+
+        // ====== 文件管理 ======
+
+        let pendingFile = null;
+
+        function handleFileDrop(event) {
+            event.preventDefault();
+            document.getElementById('file-upload-zone').classList.remove('drag-over');
+            const files = event.dataTransfer.files;
+            if (files.length > 0) selectFile(files[0]);
+        }
+
+        function handleFileSelect(event) {
+            const files = event.target.files;
+            if (files.length > 0) selectFile(files[0]);
+        }
+
+        function selectFile(file) {
+            pendingFile = file;
+            document.getElementById('file-selected-name').textContent = `📄 ${file.name} (${formatSize(file.size)})`;
+            document.getElementById('file-desc-row').style.display = 'flex';
+            document.getElementById('file-description').focus();
+        }
+
+        async function uploadFile() {
+            if (!pendingFile) return;
+            const btn = document.getElementById('file-upload-btn');
+            btn.disabled = true;
+            btn.textContent = '上传中...';
+
+            const formData = new FormData();
+            formData.append('file', pendingFile);
+            formData.append('description', document.getElementById('file-description').value);
+
+            try {
+                const res = await fetch(API_BASE + '/api/files/upload', { method: 'POST', body: formData });
+                const data = await res.json();
+                if (data.status === 'ok') {
+                    showToast({ task_name: '文件上传', result: `✅ ${data.file.original_name} 上传成功\n⏳ AI 标签生成中...`, time: '' });
+                    pendingFile = null;
+                    document.getElementById('file-desc-row').style.display = 'none';
+                    document.getElementById('file-description').value = '';
+                    document.getElementById('file-input-hidden').value = '';
+                    loadFiles();
+                } else {
+                    alert('上传失败: ' + data.message);
+                }
+            } catch (e) {
+                alert('网络错误: ' + e);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '🚀 上传';
+            }
+        }
+
+        let searchTimer = null;
+        function searchFiles() {
+            clearTimeout(searchTimer);
+            searchTimer = setTimeout(async () => {
+                const q = document.getElementById('file-search-input').value.trim();
+                try {
+                    const res = await fetch(API_BASE + '/api/files/search?q=' + encodeURIComponent(q));
+                    const data = await res.json();
+                    renderFileCards(data.files || []);
+                } catch (e) { console.error('搜索失败:', e); }
+            }, 300);
+        }
+
+        async function aiSearchFiles() {
+            const prompt = document.getElementById('file-search-input').value.trim();
+            if (!prompt) {
+                alert('请输入你要找的文件的描述（例如："找一张下雨的照片"或"文档"）');
+                return;
+            }
+
+            const btn = document.getElementById('btn-file-ai-search');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="btn-loading">✨</span> 语义检索中...';
+
+            try {
+                const res = await fetch(API_BASE + '/api/files/ai_search', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ prompt })
+                });
+                const data = await res.json();
+                if (data.status === 'ok') {
+                    renderFileCards(data.files || []);
+                    if (data.reason) {
+                        showToast({ task_name: '✨ AI 检索完毕', result: data.reason, time: '' });
+                    }
+                } else {
+                    alert('AI 检索失败: ' + (data.message || '未知错误'));
+                }
+            } catch (e) {
+                alert('网络错误: ' + e);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '✨ AI 语义过滤';
+            }
+        }
+
+        async function loadFiles() {
+            try {
+                const res = await fetch(API_BASE + '/api/files');
+                const data = await res.json();
+                renderFileCards(data.files || []);
+            } catch (e) { console.error('加载文件失败:', e); }
+        }
+
+        function renderFileCards(files) {
+            const grid = document.getElementById('file-grid');
+            grid.innerHTML = '';
+            if (files.length === 0) {
+                grid.innerHTML = '<div style="grid-column:1/-1; text-align:center; color:#999; padding:40px; font-size:16px;">暂无文件，拖拽文件到上方区域上传 ☁️</div>';
+                return;
+            }
+            files.forEach(f => {
+                const hasTags = f.tags && f.tags.length > 0;
+                const tagsHtml = hasTags
+                    ? (f.tags || []).map(t => `<span class="file-tag">${t}</span>`).join('')
+                    : '<span class="file-tag" style="opacity:0.6; animation: pulse 1.5s infinite;">⏳ 标签生成中...</span>';
+                const card = document.createElement('div');
+                card.className = 'file-card';
+                card.setAttribute('data-object-name', f.object_name);
+                card.innerHTML = `
+                    <div class="file-card-header">
+                        <span class="file-card-icon">${getFileIcon(f.content_type)}</span>
+                        <span class="file-card-name" title="${f.original_name}">${f.original_name}</span>
+                    </div>
+                    <div class="file-card-desc">${f.description || '无描述'}</div>
+                    <div class="file-card-tags">${tagsHtml}</div>
+                    <div class="file-card-meta">
+                        <span>${formatSize(f.size)}</span>
+                        <span>${(f.uploaded_at || '').substring(0, 16).replace('T', ' ')}</span>
+                    </div>
+                    <div class="file-card-actions">
+                        <a class="task-btn task-btn-resume" href="${f.download_url}" target="_blank" rel="noopener">⬇ 下载</a>
+                        <button class="task-btn task-btn-delete" onclick="deleteFile('${f.object_name}')">🗑 删除</button>
+                    </div>
+                `;
+                grid.appendChild(card);
+            });
+        }
+
+        function getFileIcon(contentType) {
+            if (!contentType) return '📄';
+            if (contentType.startsWith('image/')) return '🖼️';
+            if (contentType.startsWith('video/')) return '🎬';
+            if (contentType.startsWith('audio/')) return '🎵';
+            if (contentType.includes('pdf')) return '📕';
+            if (contentType.includes('zip') || contentType.includes('rar') || contentType.includes('7z')) return '📦';
+            if (contentType.includes('word') || contentType.includes('document')) return '📝';
+            if (contentType.includes('sheet') || contentType.includes('excel')) return '📊';
+            if (contentType.includes('presentation') || contentType.includes('powerpoint')) return '📽️';
+            return '📄';
+        }
+
+        function formatSize(bytes) {
+            if (!bytes) return '0 B';
+            const units = ['B', 'KB', 'MB', 'GB'];
+            let i = 0;
+            let size = bytes;
+            while (size >= 1024 && i < units.length - 1) { size /= 1024; i++; }
+            return size.toFixed(i > 0 ? 1 : 0) + ' ' + units[i];
+        }
+
+        async function deleteFile(objectName) {
+            if (!confirm('确定要删除这个文件吗？')) return;
+            try {
+                await fetch(API_BASE + '/api/files/' + encodeURIComponent(objectName), { method: 'DELETE' });
+                loadFiles();
+            } catch (e) { alert('删除失败: ' + e); }
+        }
+
+        // 页面加载时连接 WebSocket
+        connectWebSocket();
+
+        // ====== 音乐播放器 ======
+
+        let allSongs = [];   // 所有歌曲（缓存）
+        let musicQueue = [];   // 播放队列
+        let currentSearchMode = 'name';
+        let currentSongIndex = -1;
+        let currentLyrics = [];
+        let fullscreenOpen = false;
+        const audioPlayer = document.getElementById('audio-player');
+
+        // 搜索模式切换
+        function setSearchMode(mode) {
+            currentSearchMode = mode;
+            document.querySelectorAll('.search-mode-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
+            const input = document.getElementById('music-search-input');
+            const placeholders = {name:'输入歌曲名称...', ai:'描述你的心情或场景，如：下雨天适合听的安静歌曲...', tag:'输入标签关键词，如：电子、流行...'};
+            input.placeholder = placeholders[mode] || '';
+            input.value = '';
+        }
+
+        // 生成基于字符串的渐变色（用于封面占位）
+        function generateCoverGradient(str) {
+            let hash = 0;
+            for (let i = 0; i < str.length; i++) {
+                hash = str.charCodeAt(i) + ((hash << 5) - hash);
+            }
+            const h1 = Math.abs(hash % 360);
+            const h2 = (h1 + 40) % 360;
+            return `linear-gradient(135deg, hsl(${h1},55%,35%), hsl(${h2},65%,25%))`;
+        }
+
+        // 获取歌曲显示信息
+        function getSongDisplayInfo(song) {
+            const meta = song.file_meta || {};
+            const title = meta.title || song.original_name.replace(/\.[^.]+$/, '');
+            const artist = (meta.artists || []).join('、') || '';
+            return { title, artist };
+        }
+
+        // 加载所有音乐
+        async function loadMusic() {
+            try {
+                const res = await fetch(API_BASE + '/api/music');
+                const data = await res.json();
+                allSongs = (data.songs || []);
+                allSongs.forEach(s => { s.download_url = s.download_url || ''; });
+                renderBrowseList(allSongs);
+            } catch (e) {
+                console.error('加载音乐失败:', e);
+            }
+        }
+
+        // 搜索
+        async function doMusicSearch() {
+            const query = document.getElementById('music-search-input').value.trim();
+            if (!query) { renderBrowseList(allSongs); return; }
+
+            if (currentSearchMode === 'name') {
+                // 本地过滤名字
+                const q = query.toLowerCase();
+                const filtered = allSongs.filter(s => {
+                    const info = getSongDisplayInfo(s);
+                    return info.title.toLowerCase().includes(q) || info.artist.toLowerCase().includes(q) || s.original_name.toLowerCase().includes(q);
+                });
+                renderBrowseList(filtered);
+            } else if (currentSearchMode === 'tag') {
+                // 本地过滤标签
+                const q = query.toLowerCase();
+                const filtered = allSongs.filter(s => (s.tags || []).some(t => t.toLowerCase().includes(q)));
+                renderBrowseList(filtered);
+            } else if (currentSearchMode === 'ai') {
+                // AI 推荐
+                const btn = document.querySelector('.music-search-input-row .btn-send');
+                btn.disabled = true; btn.textContent = '生成中...';
+                try {
+                    const res = await fetch(API_BASE + '/api/music/playlist', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ prompt: query })
+                    });
+                    const data = await res.json();
+                    if (data.status === 'ok' && data.playlist && data.playlist.songs) {
+                        renderBrowseList(data.playlist.songs);
+                        showToast({ task_name: '✨ AI 推荐', result: `${data.playlist.playlist_name}\n${data.playlist.description}`, time: '' });
+                    } else {
+                        renderBrowseList([]);
+                    }
+                } catch (e) {
+                    alert('AI 推荐失败: ' + e);
+                } finally {
+                    btn.disabled = false; btn.textContent = '搜索';
+                }
+            }
+        }
+
+        // 渲染左侧浏览列表
+        function renderBrowseList(songs) {
+            const list = document.getElementById('music-browse-list');
+            list.innerHTML = '';
+            if (!songs || songs.length === 0) {
+                list.innerHTML = '<div class="song-list-empty">🎵 没有找到匹配的歌曲</div>';
+                return;
+            }
+            songs.forEach((song, idx) => {
+                const info = getSongDisplayInfo(song);
+                const item = document.createElement('div');
+                item.className = 'browse-song-item';
+                item.innerHTML = `
+                    <div class="song-icon">🎵</div>
+                    <div class="song-info">
+                        <div class="song-title">${info.title}</div>
+                        ${info.artist ? `<div class="song-artist">${info.artist}</div>` : ''}
+                    </div>
+                    <button class="song-add-btn" onclick="event.stopPropagation(); addToQueue(this)" data-song-idx="${idx}">+ 添加</button>
+                `;
+                item.onclick = () => { addToQueue(item.querySelector('.song-add-btn')); };
+                // 存储歌曲数据引用
+                item._songData = song;
+                list.appendChild(item);
+            });
+        }
+
+        // 添加到队列
+        function addToQueue(btnEl) {
+            const item = btnEl.closest('.browse-song-item');
+            const song = item._songData;
+            if (!song) return;
+            // 避免重复添加
+            if (musicQueue.some(s => s.object_name === song.object_name)) {
+                btnEl.textContent = '已添加';
+                setTimeout(() => { btnEl.textContent = '+ 添加'; }, 1000);
+                return;
+            }
+            musicQueue.push(song);
+            btnEl.textContent = '✓';
+            setTimeout(() => { btnEl.textContent = '+ 添加'; }, 800);
+            renderQueue();
+        }
+
+        // 从队列移除
+        function removeFromQueue(idx) {
+            // 如果移除的是正在播放的或之前的歌，调整索引
+            if (idx < currentSongIndex) currentSongIndex--;
+            else if (idx === currentSongIndex) {
+                audioPlayer.pause();
+                currentSongIndex = -1;
+            }
+            musicQueue.splice(idx, 1);
+            renderQueue();
+        }
+
+        // 清空队列
+        function clearQueue() {
+            musicQueue = [];
+            currentSongIndex = -1;
+            audioPlayer.pause();
+            document.getElementById('music-player-bar').style.display = 'none';
+            renderQueue();
+        }
+
+        // 渲染右侧队列
+        function renderQueue() {
+            const list = document.getElementById('music-queue-list');
+            const actions = document.getElementById('music-queue-actions');
+            document.getElementById('queue-count').textContent = musicQueue.length + ' 首';
+
+            if (musicQueue.length === 0) {
+                list.innerHTML = '<div class="song-list-empty">🎵 从左侧添加歌曲到队列<br>歌单播完自动停止</div>';
+                actions.style.display = 'none';
+                return;
+            }
+            actions.style.display = 'flex';
+            list.innerHTML = '';
+            musicQueue.forEach((song, idx) => {
+                const info = getSongDisplayInfo(song);
+                const isPlaying = idx === currentSongIndex;
+                const item = document.createElement('div');
+                item.className = 'queue-song-item' + (isPlaying ? ' now-playing' : '');
+                item.innerHTML = `
+                    <div class="song-info">
+                        <div class="song-title">${isPlaying ? '♫ ' : ''}${info.artist ? info.artist + ' - ' : ''}${info.title}</div>
+                    </div>
+                    <button class="queue-remove-btn" onclick="event.stopPropagation(); removeFromQueue(${idx})">✕</button>
+                `;
+                item.onclick = () => playSong(idx);
+                list.appendChild(item);
+            });
+        }
+
+        // 播放队列
+        function playQueue() {
+            if (musicQueue.length > 0) {
+                currentPlaylist = musicQueue;
+                playSong(0);
+            }
+        }
+
+        // 兼容旧 currentPlaylist 引用（保持 playSong/playNext 等正常工作）
+        let currentPlaylist = [];
+
+        function playSong(index) {
+            currentPlaylist = musicQueue; // 保持同步
+            if (index < 0 || index >= musicQueue.length) return;
+            const song = musicQueue[index];
+            currentSongIndex = index;
+
+            audioPlayer.src = song.download_url;
+            audioPlayer.play();
+
+            const info = getSongDisplayInfo(song);
+            const coverArt = `/api/music/cover/${encodeURIComponent(song.object_name)}`;
+            const coverGrad = generateCoverGradient(song.original_name);
+
+            // 迷你播放器
+            const bar = document.getElementById('music-player-bar');
+            bar.style.display = 'block';
+            document.getElementById('player-song-name').textContent = info.title;
+            document.getElementById('player-song-artist').textContent = info.artist;
+            document.getElementById('player-play-btn').textContent = '⏸';
+
+            // 全屏播放器
+            document.getElementById('fp-song-title').textContent = info.title;
+            document.getElementById('fp-song-artist').textContent = info.artist;
+            document.getElementById('fp-play-btn').textContent = '⏸';
+
+            // 封面
+            const coverEl = document.getElementById('fp-cover-img');
+            coverEl.innerHTML = `<img src="${coverArt}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" onerror="this.outerHTML='🎵'; this.parentElement.style.background='${coverGrad}'">`;
+            coverEl.style.background = 'transparent';
+
+            // 加载歌词
+            loadLyrics(song);
+
+            renderQueue();
+        }
+
+        function togglePlay() {
+            if (!audioPlayer.src) return;
+            if (audioPlayer.paused) {
+                audioPlayer.play();
+                document.getElementById('player-play-btn').textContent = '⏸';
+                document.getElementById('fp-play-btn').textContent = '⏸';
+            } else {
+                audioPlayer.pause();
+                document.getElementById('player-play-btn').textContent = '▶';
+                document.getElementById('fp-play-btn').textContent = '▶';
+            }
+        }
+
+        function playPrev() {
+            if (musicQueue.length === 0 || currentSongIndex <= 0) return;
+            playSong(currentSongIndex - 1);
+        }
+
+        function playNext() {
+            if (musicQueue.length === 0) return;
+            const nextIdx = currentSongIndex + 1;
+            if (nextIdx >= musicQueue.length) {
+                // 播完了，不循环
+                audioPlayer.pause();
+                document.getElementById('player-play-btn').textContent = '▶';
+                document.getElementById('fp-play-btn').textContent = '▶';
+                return;
+            }
+            playSong(nextIdx);
+        }
+
+        // 歌曲播完自动下一首（不循环）
+        audioPlayer.onended = () => { playNext(); };
+
+        function seekTo(event) {
+            if (!audioPlayer.duration) return;
+            // 寻找点击的进度条（迷你或全屏）
+            const bar = event.currentTarget;
+            const rect = bar.getBoundingClientRect();
+            const pct = (event.clientX - rect.left) / rect.width;
+            audioPlayer.currentTime = pct * audioPlayer.duration;
+            event.stopPropagation();
+        }
+
+        function setVolume(val) {
+            audioPlayer.volume = val / 100;
+            // 同步两个音量滑块
+            document.getElementById('player-volume').value = val;
+            document.getElementById('fp-volume').value = val;
+            const icon = val == 0 ? '🔇' : val < 40 ? '🔉' : '🔊';
+            document.querySelectorAll('.player-volume-icon, .fp-volume-icon').forEach(el => el.textContent = icon);
+        }
+
+        function toggleMute() {
+            audioPlayer.muted = !audioPlayer.muted;
+            const icon = audioPlayer.muted ? '🔇' : '🔊';
+            document.querySelectorAll('.player-volume-icon, .fp-volume-icon').forEach(el => el.textContent = icon);
+        }
+
+        function formatTime(s) {
+            if (!s || isNaN(s)) return '0:00';
+            const m = Math.floor(s / 60);
+            const sec = Math.floor(s % 60);
+            return m + ':' + String(sec).padStart(2, '0');
+        }
+
+        // 音频事件
+        audioPlayer.addEventListener('timeupdate', () => {
+            if (!audioPlayer.duration) return;
+            const pct = (audioPlayer.currentTime / audioPlayer.duration) * 100;
+            // 迷你播放器进度
+            document.getElementById('player-progress-fill').style.width = pct + '%';
+            document.getElementById('player-time').textContent =
+                formatTime(audioPlayer.currentTime) + ' / ' + formatTime(audioPlayer.duration);
+            // 全屏播放器进度
+            document.getElementById('fp-progress-fill').style.width = pct + '%';
+            document.getElementById('fp-time-current').textContent = formatTime(audioPlayer.currentTime);
+            document.getElementById('fp-time-total').textContent = formatTime(audioPlayer.duration);
+
+            // 歌词同步
+            if (currentLyrics.length > 0 && fullscreenOpen) {
+                syncLyrics(audioPlayer.currentTime);
+            }
+        });
+
+        audioPlayer.addEventListener('ended', () => {
+            playNext();
+        });
+
+        audioPlayer.addEventListener('pause', () => {
+            document.getElementById('player-play-btn').textContent = '▶';
+            document.getElementById('fp-play-btn').textContent = '▶';
+            document.getElementById('music-player-bar').classList.remove('is-playing');
+            document.getElementById('fp-vinyl').classList.remove('fp-spinning');
+        });
+
+        audioPlayer.addEventListener('play', () => {
+            document.getElementById('player-play-btn').textContent = '⏸';
+            document.getElementById('fp-play-btn').textContent = '⏸';
+            document.getElementById('music-player-bar').classList.add('is-playing');
+            document.getElementById('fp-vinyl').classList.add('fp-spinning');
+        });
+
+        audioPlayer.volume = 0.8;
+
+        // ====== 全屏播放器 ======
+
+        function openFullscreenPlayer(event) {
+            // 不在控件内触发
+            if (event && event.target.closest('.player-controls, .player-right, .player-progress-bar')) return;
+            const fp = document.getElementById('fullscreen-player');
+            fp.classList.add('fp-open');
+            fullscreenOpen = true;
+            // 如果有歌词则开始同步
+            if (currentLyrics.length > 0) {
+                syncLyrics(audioPlayer.currentTime);
+            }
+        }
+
+        function closeFullscreenPlayer() {
+            const fp = document.getElementById('fullscreen-player');
+            fp.classList.remove('fp-open');
+            fullscreenOpen = false;
+        }
+
+        // ====== 歌词功能 ======
+
+        function parseLRC(lrcText) {
+            const lines = lrcText.split('\n');
+            const result = [];
+            const timeRegex = /\[(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?\]/g;
+            for (const line of lines) {
+                const matches = [...line.matchAll(timeRegex)];
+                if (matches.length === 0) continue;
+                const text = line.replace(timeRegex, '').trim();
+                if (!text) continue;
+                for (const m of matches) {
+                    const min = parseInt(m[1]);
+                    const sec = parseInt(m[2]);
+                    const ms = m[3] ? parseInt(m[3].padEnd(3, '0')) : 0;
+                    result.push({ time: min * 60 + sec + ms / 1000, text });
+                }
+            }
+            result.sort((a, b) => a.time - b.time);
+            return result;
+        }
+
+        async function loadLyrics(song) {
+            const content = document.getElementById('fp-lyrics-content');
+            currentLyrics = [];
+            content.innerHTML = '<div class="lyrics-empty">⏳ 正在提取歌词...</div>';
+
+            try {
+                const res = await fetch(`/api/music/lyrics/${encodeURIComponent(song.object_name)}`);
+                const data = await res.json();
+                const lyricsText = data.lyrics || '';
+
+                if (!lyricsText.trim()) {
+                    content.innerHTML = '<div class="lyrics-empty">🎵 当前歌曲暂无歌词</div>';
+                    return;
+                }
+
+                const parsed = parseLRC(lyricsText);
+                if (parsed.length > 0) {
+                    currentLyrics = parsed;
+                    content.innerHTML = parsed.map((l, i) =>
+                        `<div class="lyrics-line" data-index="${i}">${l.text}</div>`
+                    ).join('');
+                    if (fullscreenOpen && audioPlayer.duration) syncLyrics(audioPlayer.currentTime);
+                } else {
+                    content.innerHTML = lyricsText.split('\n')
+                        .filter(l => l.trim())
+                        .map(l => `<div class="lyrics-line lyrics-plain">${l}</div>`)
+                        .join('');
+                }
+            } catch (e) {
+                console.error('加载歌词失败:', e);
+                content.innerHTML = '<div class="lyrics-empty">❌ 获取歌词失败</div>';
+            }
+        }
+
+        function syncLyrics(currentTime) {
+            if (currentLyrics.length === 0) return;
+            let activeIdx = -1;
+            for (let i = currentLyrics.length - 1; i >= 0; i--) {
+                if (currentTime >= currentLyrics[i].time) {
+                    activeIdx = i;
+                    break;
+                }
+            }
+            const lines = document.querySelectorAll('#fp-lyrics-content .lyrics-line');
+            lines.forEach((el, i) => {
+                if (i === activeIdx) {
+                    el.classList.add('lyrics-active');
+                    const scroll = document.getElementById('fp-lyrics-scroll');
+                    const offset = el.offsetTop - scroll.offsetTop - scroll.clientHeight / 2 + el.clientHeight / 2;
+                    scroll.scrollTo({ top: offset, behavior: 'smooth' });
+                } else {
+                    el.classList.remove('lyrics-active');
+                }
+            });
+        }
+
+        // 全局拦截聊天区域内的 A 标签点击事件，强制在新标签页打开（修复部分标头环境下 target="_blank" 失效的问题）
+        document.getElementById('chat-history').addEventListener('click', function (e) {
+            let target = e.target;
+            while (target && target !== this) {
+                if (target.tagName === 'A') {
+                    const href = target.getAttribute('href');
+                    if (href && !href.startsWith('#') && !href.startsWith('javascript:')) {
+                        e.preventDefault();
+                        window.open(href, '_blank');
+                    }
+                    return;
+                }
+                target = target.parentNode;
+            }
+        });
+
+    </script>
+</body>
+
+</html>
