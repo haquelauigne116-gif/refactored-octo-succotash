@@ -228,7 +228,7 @@ def _metadata_to_categorized_tags(meta: dict) -> dict[str, list[str]]:
     ft = meta.get("file_type", "")
     if ft:
         type_map = {"audio": "音频", "image": "图片", "video": "视频"}
-        cats["file_type"].append(type_map.get(ft) or ft)
+        cats["file_type"].append(type_map.get(ft, ft))
     if meta.get("format"):
         cats["file_type"].append(str(meta["format"]).upper())
 
@@ -271,11 +271,6 @@ def _flatten_categorized_tags(cats: dict[str, list[str]]) -> list[str]:
 
 class MinIOManager:
     """MinIO 文件管理器 — MinIO 只存文件，所有信息存本地索引"""
-
-    _AUDIO_TYPES = {
-        "audio/mpeg", "audio/mp3", "audio/wav", "audio/flac",
-        "audio/ogg", "audio/aac", "audio/x-m4a", "audio/mp4"
-    }
 
     def __init__(self):
         cfg = load_minio_config()
@@ -324,39 +319,11 @@ class MinIOManager:
                     logger.info(f"[MinIO] 索引加载 {k}: cover_art={has_cover}")
                 logger.info(f"[MinIO] 索引加载成功: {len(self._index)} 个文件")
             else:
-                logger.info("[MinIO] 索引文件不存在，将创建新索引")
-        except Exception as e:
-            logger.error(f"[MinIO] 索引加载失败: {e}")
-
-    def _save_index(self) -> None:
-        """将索引保存到磁盘"""
-        try:
-            os.makedirs(os.path.dirname(MINIO_INDEX_FILE), exist_ok=True)
-            with self._index_lock:
-                data = dict(self._index)
-            with open(MINIO_INDEX_FILE, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            logger.error(f"[MinIO] 索引保存失败: {e}")
-
-    def _index_put(self, entry: dict) -> None:
-        """将一个文件条目写入索引并保存"""
-        object_name = entry["object_name"]
-        with self._index_lock:
-            self._index[object_name] = entry
-        self._save_index()
-
-    def _index_remove(self, object_name: str) -> None:
-        """从索引中移除一个文件条目并保存"""
-        with self._index_lock:
-            self._index.pop(object_name, None)
-        self._save_index()
-
-    def _index_update_tags(self, object_name: str, tags: list[str],
+                logger.info("[MinIO] 索引文�    def _index_update_tags(self, object_name: str, tags: list[str],
                            file_meta: dict | None = None,
                            categorized_tags: dict | None = None,
                            file_date: str = "") -> None:
-        """更新索引中某个文件的标签、元信息和文件日期"""
+        ""更新索引中某个文件的标签、元信息和文件日期""
         with self._index_lock:
             if object_name in self._index:
                 self._index[object_name]["tags"] = tags
@@ -367,6 +334,23 @@ class MinIOManager:
                     self._index[object_name]["file_meta"] = file_meta
                 if file_date:
                     self._index[object_name]["file_date"] = file_date
+        self._save_index()gs(self, object_name: str, tags: list[str],
+                           file_meta: dict | None = None,
+                           categorized_tags: dict[str, list[str]] | None = None) -> None:
+        """更新索引中某个文件的标签和元信息"""
+        with self._index_lock:
+            if object_name in self._index:
+                self._index[object_name]["tags"] = tags
+                self._index[object_name]["tagging_status"] = "done"
+                if categorized_tags:
+                    self._index[object_name]["categorized_tags"] = categorized_tags
+                if file_meta:
+                    self._index[object_name]["file_meta"] = file_meta
+                    # 提取 file_date 作为独立字段（用于时间范围搜索）
+                    if file_meta.get("taken_at"):
+                        self._index[object_name]["file_date"] = str(file_meta["taken_at"])[:10]
+                    elif file_meta.get("year"):
+                        self._index[object_name]["file_date"] = str(file_meta["year"])
         self._save_index()
 
     def _next_id(self) -> int:
@@ -458,20 +442,12 @@ class MinIOManager:
                     parts.append("专辑: " + str(file_meta['album']))
                 if file_meta.get("genre"):
                     parts.append("风格: " + str(file_meta['genre']))
-                if file_meta.get("lyricist"):
-                    parts.append("作词: " + str(file_meta['lyricist']))
-                if file_meta.get("composer"):
-                    parts.append("作曲: " + str(file_meta['composer']))
                 if file_meta.get("camera"):
                     parts.append("设备: " + str(file_meta['camera']))
                 if file_meta.get("location"):
                     parts.append("拍摄地点: " + str(file_meta['location']))
                 if file_meta.get("taken_at"):
                     parts.append("拍摄时间: " + str(file_meta['taken_at']))
-                if file_meta.get("lyrics"):
-                    # 截取歌词前 200 字作为上下文，帮助 AI 理解歌曲主题
-                    lyrics_snippet = str(file_meta['lyrics'])[:200]
-                    parts.append("歌词片段: " + lyrics_snippet)
                 if parts:
                     meta_context = "\n文件元信息：" + "；".join(parts)
 
@@ -594,47 +570,7 @@ class MinIOManager:
             # 2. 提取文件自带元信息
             file_meta = extract_file_metadata(temp_path, filename, content_type)
             logger.info(f"[MinIO] 元信息提取完成: {filename} → {file_meta}")
-
-            # 2.5 联网搜索补充音乐元信息 + 歌词
-            if file_meta.get("file_type") == "audio":
-                try:
-                    from backend.music_metadata_search import search_music_metadata  # type: ignore[import]
-                    online_meta = search_music_metadata(
-                        title=file_meta.get("title", ""),
-                        artists=file_meta.get("artists"),
-                        album=file_meta.get("album", ""),
-                        filename=filename,
-                        file_path=temp_path,
-                    )
-                    if online_meta:
-                        # 本地优先，联网补充缺失字段
-                        for key in ("title", "album", "genre", "year"):
-                            if not file_meta.get(key) and online_meta.get(key):
-                                file_meta[key] = online_meta[key]
-                        if not file_meta.get("artists") and online_meta.get("artists"):
-                            file_meta["artists"] = online_meta["artists"]
-                        # 新增字段（歌词、作词、作曲等）
-                        for key in ("lyrics", "lyricist", "composer",
-                                    "release_date", "source"):
-                            if online_meta.get(key):
-                                file_meta[key] = online_meta[key]
-                        # 如果歌词被写入了临时文件，重新上传到 MinIO
-                        if online_meta.get("lyrics") and os.path.isfile(temp_path):
-                            try:
-                                with open(temp_path, "rb") as f:
-                                    data = f.read()
-                                self.client.put_object(
-                                    self.bucket, object_name,
-                                    io.BytesIO(data), length=len(data),
-                                    content_type=content_type,
-                                )
-                                logger.info(f"[MinIO] 含歌词的音频已重新上传: {object_name}")
-                            except Exception as ue:
-                                logger.warning(f"[MinIO] 重新上传失败: {ue}")
-                        logger.info(f"[MinIO] 联网元信息补充完成: {filename}")
-                except Exception as e:
-                    logger.warning(f"[MinIO] 联网元信息搜索失败 (不影响上传): {e}")
-
+            
             # 3. AI 打分类标签
             ai_result = self._generate_categorized_tags(filename, description, file_meta)
             # 提取 file_date（AI 已分离出时间信息）

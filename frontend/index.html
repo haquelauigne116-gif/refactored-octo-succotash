@@ -44,8 +44,12 @@
                         onkeypress="handleEnter(event)"></textarea>
                     <div class="controls">
                         <label class="btn-icon" for="chat-file-input" title="添加图片/文件" style="cursor:pointer;">📎</label>
-                        <input type="file" id="chat-file-input" accept="image/*,.pdf,.doc,.docx,.txt,.md,.csv,.xls,.xlsx" multiple style="display:none;" onchange="handleChatFileSelect(event)">
-                        <span id="current-model-label" style="font-size:12px; color:#94a3b8; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:120px;" title="在设置中切换模型"></span>
+                        <input type="file" id="chat-file-input"
+                            accept="image/*,.pdf,.doc,.docx,.txt,.md,.csv,.xls,.xlsx" multiple style="display:none;"
+                            onchange="handleChatFileSelect(event)">
+                        <span id="current-model-label"
+                            style="font-size:12px; color:#94a3b8; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:120px;"
+                            title="在设置中切换模型"></span>
                         <button class="btn-send" id="send-btn" onclick="sendMessage()">发送</button>
                     </div>
                 </div>
@@ -70,12 +74,13 @@
             <div class="files-content">
                 <!-- 上传区 -->
                 <div class="file-upload-zone" id="file-upload-zone"
-                     ondragover="event.preventDefault(); this.classList.add('drag-over');"
-                     ondragleave="this.classList.remove('drag-over');"
-                     ondrop="handleFileDrop(event)">
+                    ondragover="event.preventDefault(); this.classList.add('drag-over');"
+                    ondragleave="this.classList.remove('drag-over');" ondrop="handleFileDrop(event)">
                     <div class="upload-icon">☁️</div>
-                    <div class="upload-text">拖拽文件到这里，或 <label class="upload-link" for="file-input-hidden">点击选择</label></div>
-                    <input type="file" id="file-input-hidden" style="display:none;" onchange="handleFileSelect(event)" multiple>
+                    <div class="upload-text">拖拽文件到这里，或 <label class="upload-link" for="file-input-hidden">点击选择</label>
+                    </div>
+                    <input type="file" id="file-input-hidden" style="display:none;" onchange="handleFileSelect(event)"
+                        multiple>
                 </div>
                 <div class="file-desc-row" id="file-desc-row" style="display:none;">
                     <span class="file-selected-name" id="file-selected-name"></span>
@@ -85,8 +90,10 @@
 
                 <!-- 搜索栏 -->
                 <div class="file-search-bar" style="display: flex; gap: 10px;">
-                    <input type="text" id="file-search-input" class="settings-input" style="flex: 1;" placeholder="🔍 搜索文件（根据文件名/描述过滤，支持点击右侧AI语义检索）" oninput="searchFiles()">
-                    <button class="btn-music-generate" id="btn-file-ai-search" onclick="aiSearchFiles()" style="flex-shrink: 0; padding: 0 15px; border-radius: 8px;">✨ AI 语义过滤</button>
+                    <input type="text" id="file-search-input" class="settings-input" style="flex: 1;"
+                        placeholder="🔍 搜索文件（根据文件名/描述过滤，支持点击右侧AI语义检索）" oninput="searchFiles()">
+                    <button class="btn-music-generate" id="btn-file-ai-search" onclick="aiSearchFiles()"
+                        style="flex-shrink: 0; padding: 0 15px; border-radius: 8px;">✨ AI 语义过滤</button>
                 </div>
 
                 <!-- 文件卡片网格 -->
@@ -109,14 +116,17 @@
                     </div>
                     <div class="music-search-bar">
                         <div class="music-search-modes">
-                            <button class="search-mode-btn active" data-mode="name" onclick="setSearchMode('name')">🔤 搜名字</button>
+                            <button class="search-mode-btn active" data-mode="name" onclick="setSearchMode('name')">🔤
+                                搜名字</button>
                             <button class="search-mode-btn" data-mode="ai" onclick="setSearchMode('ai')">✨ AI推荐</button>
-                            <button class="search-mode-btn" data-mode="tag" onclick="setSearchMode('tag')">🏷️ 搜标签</button>
+                            <button class="search-mode-btn" data-mode="tag" onclick="setSearchMode('tag')">🏷️
+                                搜标签</button>
                         </div>
                         <div class="music-search-input-row">
                             <input type="text" id="music-search-input" class="settings-input" placeholder="输入歌曲名称..."
                                 onkeypress="if(event.key==='Enter')doMusicSearch()">
-                            <button class="btn-send" style="padding:6px 14px; font-size:13px;" onclick="doMusicSearch()">搜索</button>
+                            <button class="btn-send" style="padding:6px 14px; font-size:13px;"
+                                onclick="doMusicSearch()">搜索</button>
                         </div>
                     </div>
                     <div class="music-browse-list" id="music-browse-list">
@@ -133,8 +143,10 @@
                         <div class="song-list-empty">🎵 从左侧添加歌曲到队列<br>歌单播完自动停止</div>
                     </div>
                     <div class="music-queue-actions" id="music-queue-actions" style="display:none;">
-                        <button class="btn-send" style="flex:1; justify-content:center; padding:6px; font-size:13px;" onclick="playQueue()">▶ 播放全部</button>
-                        <button class="btn-cancel" style="font-size:13px; padding:6px 12px;" onclick="clearQueue()">清空</button>
+                        <button class="btn-send" style="flex:1; justify-content:center; padding:6px; font-size:13px;"
+                            onclick="playQueue()">▶ 播放全部</button>
+                        <button class="btn-cancel" style="font-size:13px; padding:6px 12px;"
+                            onclick="clearQueue()">清空</button>
                     </div>
                 </div>
             </div>
@@ -148,11 +160,17 @@
                 <div class="fp-body">
                     <!-- 左侧封面 -->
                     <div class="fp-cover-section">
-                        <div class="fp-vinyl-wrapper">
-                            <div class="fp-vinyl" id="fp-vinyl">
-                                <div class="fp-vinyl-inner">
-                                    <div class="fp-cover-img" id="fp-cover-img">🎵</div>
-                                </div>
+                        <div class="fp-square-cover-wrapper" id="fp-square-cover">
+                            <div class="fp-cover-img" id="fp-cover-img">🎵</div>
+                            <div class="fp-rhythm-bars" id="fp-rhythm-bars">
+                                <div class="rhythm-bar"></div>
+                                <div class="rhythm-bar"></div>
+                                <div class="rhythm-bar"></div>
+                                <div class="rhythm-bar"></div>
+                                <div class="rhythm-bar"></div>
+                                <div class="rhythm-bar"></div>
+                                <div class="rhythm-bar"></div>
+                                <div class="rhythm-bar"></div>
                             </div>
                         </div>
                     </div>
@@ -180,18 +198,21 @@
                     </div>
                     <div class="fp-buttons">
                         <button class="fp-btn" onclick="playPrev()" title="上一首">⏮</button>
-                        <button class="fp-btn fp-btn-play" id="fp-play-btn" onclick="togglePlay()" title="播放/暂停">▶</button>
+                        <button class="fp-btn fp-btn-play" id="fp-play-btn" onclick="togglePlay()"
+                            title="播放/暂停">▶</button>
                         <button class="fp-btn" onclick="playNext()" title="下一首">⏭</button>
                         <div class="fp-volume">
                             <span class="fp-volume-icon" onclick="toggleMute()">🔊</span>
-                            <input type="range" class="fp-volume-slider" id="fp-volume" min="0" max="100" value="80" oninput="setVolume(this.value)">
+                            <input type="range" class="fp-volume-slider" id="fp-volume" min="0" max="100" value="80"
+                                oninput="setVolume(this.value)">
                         </div>
                     </div>
                 </div>
             </div>
 
             <!-- 底部迷你播放器 -->
-            <div class="music-player-bar" id="music-player-bar" style="display:none;" onclick="openFullscreenPlayer(event)">
+            <div class="music-player-bar" id="music-player-bar" style="display:none;"
+                onclick="openFullscreenPlayer(event)">
                 <div class="player-progress-bar" id="player-progress-bar" onclick="seekTo(event)">
                     <div class="player-progress-fill" id="player-progress-fill"></div>
                 </div>
@@ -205,14 +226,16 @@
                     </div>
                     <div class="player-controls" onclick="event.stopPropagation()">
                         <button class="player-btn" onclick="playPrev()" title="上一首">⏮</button>
-                        <button class="player-btn player-btn-play" id="player-play-btn" onclick="togglePlay()" title="播放/暂停">▶</button>
+                        <button class="player-btn player-btn-play" id="player-play-btn" onclick="togglePlay()"
+                            title="播放/暂停">▶</button>
                         <button class="player-btn" onclick="playNext()" title="下一首">⏭</button>
                     </div>
                     <div class="player-right" onclick="event.stopPropagation()">
                         <span class="player-time" id="player-time">0:00 / 0:00</span>
                         <div class="player-volume">
                             <span class="player-volume-icon" onclick="toggleMute()">🔊</span>
-                            <input type="range" class="player-volume-slider" id="player-volume" min="0" max="100" value="80" oninput="setVolume(this.value)">
+                            <input type="range" class="player-volume-slider" id="player-volume" min="0" max="100"
+                                value="80" oninput="setVolume(this.value)">
                         </div>
                     </div>
                 </div>
@@ -242,7 +265,8 @@
                 <div id="trigger-interval-fields" class="trigger-fields">
                     <div class="settings-form-row">
                         <label>间隔时间：</label>
-                        <input type="number" id="interval-value" class="settings-input" value="60" min="1" style="width:80px;">
+                        <input type="number" id="interval-value" class="settings-input" value="60" min="1"
+                            style="width:80px;">
                         <select id="interval-unit" class="settings-select" style="width:100px; margin-left:8px;">
                             <option value="seconds">秒</option>
                             <option value="minutes" selected>分钟</option>
@@ -257,15 +281,19 @@
                         <label>Cron 表达式：</label>
                         <div style="flex:1;">
                             <div style="display:flex; gap:8px; align-items:center;">
-                                <input type="text" id="cron-hour" class="settings-input" placeholder="时 (0-23)" style="width:80px;" value="9">
+                                <input type="text" id="cron-hour" class="settings-input" placeholder="时 (0-23)"
+                                    style="width:80px;" value="9">
                                 <span>:</span>
-                                <input type="text" id="cron-minute" class="settings-input" placeholder="分 (0-59)" style="width:80px;" value="0">
+                                <input type="text" id="cron-minute" class="settings-input" placeholder="分 (0-59)"
+                                    style="width:80px;" value="0">
                             </div>
                             <div style="display:flex; gap:8px; align-items:center; margin-top:8px;">
                                 <label style="min-width:auto; font-size:13px; color:#888;">星期：</label>
-                                <input type="text" id="cron-dow" class="settings-input" placeholder="0-6 或 mon-fri" style="width:150px;" value="mon-fri">
+                                <input type="text" id="cron-dow" class="settings-input" placeholder="0-6 或 mon-fri"
+                                    style="width:150px;" value="mon-fri">
                             </div>
-                            <p style="font-size:12px; color:#999; margin-top:6px;">示例: 时=9, 分=0, 星期=mon-fri → 周一到周五早上9:00</p>
+                            <p style="font-size:12px; color:#999; margin-top:6px;">示例: 时=9, 分=0, 星期=mon-fri →
+                                周一到周五早上9:00</p>
                         </div>
                     </div>
                 </div>
@@ -286,33 +314,39 @@
                 </div>
 
                 <div style="display:flex; gap:10px; margin-top:18px; justify-content:flex-end;">
-                    <button class="btn-cancel" onclick="document.getElementById('task-modal').style.display='none'">取消</button>
+                    <button class="btn-cancel"
+                        onclick="document.getElementById('task-modal').style.display='none'">取消</button>
                     <button class="btn-send" onclick="createTask()">创建任务</button>
                 </div>
             </div>
         </div>
-        
+
         <div id="settings-view" class="view-container">
             <div class="task-header">系统设置与帮助</div>
             <div class="settings-content" style="padding: 20px; overflow-y: auto;">
-                
+
                 <div class="settings-card">
                     <h3 style="margin-bottom: 10px;">🌟 RAG 知识库使用说明</h3>
                     <p style="font-size: 14px; color: #555; line-height: 1.6;">
                         1. <strong>什么是 RAG？</strong> 检索增强生成 (RAG) 允许 AI 在回答前，先去本地文件夹搜索相关文档，以便结合私有知识准确回答问题。<br>
-                        2. <strong>如何使用？</strong> 只需在项目根目录新建一个名为 <code>knowledge_base</code> 的文件夹，在里面放入 <code>.txt</code> 或 <code>.md</code> 文件即可。系统启动时会自动加载。<br>
-                        3. <strong>判断机制</strong>：当你在聊天框发送消息时，后台会先调用下方配置的<strong>判断模型</strong>来决定是否需要查询知识库。如果判断需要，则检索内容作为上下文附加给聊天模型。这样既省 Token 又能保证回答质量。
+                        2. <strong>如何使用？</strong> 只需在项目根目录新建一个名为 <code>knowledge_base</code> 的文件夹，在里面放入
+                        <code>.txt</code> 或 <code>.md</code> 文件即可。系统启动时会自动加载。<br>
+                        3.
+                        <strong>判断机制</strong>：当你在聊天框发送消息时，后台会先调用下方配置的<strong>判断模型</strong>来决定是否需要查询知识库。如果判断需要，则检索内容作为上下文附加给聊天模型。这样既省
+                        Token 又能保证回答质量。
                     </p>
                 </div>
-                
+
                 <div class="settings-card" style="margin-top: 20px;">
                     <h3 style="margin-bottom: 15px;">🔑 API Key 配置</h3>
                     <div id="api-keys-container">
                         <!-- 动态生成的密钥输入框 -->
                     </div>
-                    <div class="settings-form-row" style="margin-top:10px; padding-top:10px; border-top:1px dashed #e2e8f0;">
+                    <div class="settings-form-row"
+                        style="margin-top:10px; padding-top:10px; border-top:1px dashed #e2e8f0;">
                         <label style="width: 150px;">阿里云百炼 Key:</label>
-                        <input type="text" id="bailian-api-key" class="settings-input" placeholder="用于接入官方 MCP 服务 (画图/地图/搜索/语音)">
+                        <input type="text" id="bailian-api-key" class="settings-input"
+                            placeholder="用于接入官方 MCP 服务 (画图/地图/搜索/语音)">
                     </div>
                 </div>
 
@@ -326,7 +360,8 @@
                     <div class="settings-form-row">
                         <label>启用 MCP 服务：</label>
                         <label style="display:flex; align-items:center; cursor:pointer;">
-                            <input type="checkbox" id="enable-mcp-checkbox" style="width:16px; height:16px; margin:0 8px 0 0;">
+                            <input type="checkbox" id="enable-mcp-checkbox"
+                                style="width:16px; height:16px; margin:0 8px 0 0;">
                             <span style="font-size:13px; color:#555;">允许判断模型根据意图自动调用百炼外部工具</span>
                         </label>
                     </div>
@@ -342,8 +377,11 @@
                     </div>
                 </div>
 
-                <button class="btn-send" style="margin-top: 20px; width: 100%; justify-content: center;" onclick="saveSettings()">保存配置</button>
-                <div id="settings-msg" style="margin-top: 10px; text-align: center; color: #10b981; font-weight: bold; display: none;">配置已保存！</div>
+                <button class="btn-send" style="margin-top: 20px; width: 100%; justify-content: center;"
+                    onclick="saveSettings()">保存配置</button>
+                <div id="settings-msg"
+                    style="margin-top: 10px; text-align: center; color: #10b981; font-weight: bold; display: none;">
+                    配置已保存！</div>
             </div>
         </div>
     </div>
@@ -388,7 +426,7 @@
             try {
                 const res = await fetch(API_BASE + "/providers");
                 const data = await res.json();
-                
+
                 globalProviders = data.providers;
                 currentChatProvider = data.current_provider;
                 currentChatModel = data.current_model;
@@ -416,7 +454,7 @@
                     }
                 });
             });
-            const capsMap = {text:'文本', vision:'视觉', reasoning:'推理'};
+            const capsMap = { text: '文本', vision: '视觉', reasoning: '推理' };
             const capsStr = caps.map(c => capsMap[c] || '').join(' ');
             label.textContent = name + ' ' + capsStr;
         }
@@ -426,7 +464,7 @@
                 const res = await fetch(API_BASE + "/api/settings");
                 const data = await res.json();
                 systemSettingsData = data.settings;
-                
+
                 // 渲染 API Keys
                 const keysContainer = document.getElementById('api-keys-container');
                 keysContainer.innerHTML = '';
@@ -438,10 +476,10 @@
                         </div>
                     `;
                 }
-                
+
                 // 渲染 MCP 配置
-                document.getElementById('bailian-api-key').placeholder = data.settings.bailian_api_key 
-                    ? `(已配置, 留空不修改)` 
+                document.getElementById('bailian-api-key').placeholder = data.settings.bailian_api_key
+                    ? `(已配置, 留空不修改)`
                     : `用于接入官方 MCP 服务 (画图/地图/搜索/语音)`;
                 document.getElementById('enable-mcp-checkbox').checked = !!data.settings.enable_mcp_for_chat;
 
@@ -452,14 +490,14 @@
                 chatSelect.innerHTML = '';
                 sumSelect.innerHTML = '';
                 judgeSelect.innerHTML = '';
-                
+
                 globalProviders.forEach(p => {
                     const makeGroup = () => { let g = document.createElement('optgroup'); g.label = p.name; return g; };
                     const gc = makeGroup(), gs = makeGroup(), gj = makeGroup();
                     p.models.forEach(m => {
-                        const capsMap = {text:'文本', vision:'视觉', reasoning:'推理'};
+                        const capsMap = { text: '文本', vision: '视觉', reasoning: '推理' };
                         const capsStr = (m.caps || ['text']).map(c => capsMap[c] || c).join(' ');
-                        const getOpt = () => { let o = document.createElement('option'); o.value = p.id+'|'+m.id; o.textContent = m.name + ' ' + capsStr; return o;};
+                        const getOpt = () => { let o = document.createElement('option'); o.value = p.id + '|' + m.id; o.textContent = m.name + ' ' + capsStr; return o; };
                         gc.appendChild(getOpt());
                         gs.appendChild(getOpt());
                         gj.appendChild(getOpt());
@@ -471,10 +509,10 @@
 
                 // 设置当前值
                 chatSelect.value = currentChatProvider + '|' + currentChatModel;
-                if(systemSettingsData.summary_model) {
+                if (systemSettingsData.summary_model) {
                     sumSelect.value = systemSettingsData.summary_provider + '|' + systemSettingsData.summary_model;
                 }
-                if(systemSettingsData.judge_model) {
+                if (systemSettingsData.judge_model) {
                     judgeSelect.value = systemSettingsData.judge_provider + '|' + systemSettingsData.judge_model;
                 }
 
@@ -511,15 +549,15 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
                 });
-                
+
                 const msg = document.getElementById('settings-msg');
                 msg.style.display = 'block';
                 setTimeout(() => msg.style.display = 'none', 3000);
-                
+
                 inputs.forEach(inp => inp.value = '');
                 document.getElementById('bailian-api-key').value = '';
                 loadSettings();
-                
+
             } catch (err) {
                 alert('保存失败: ' + err);
             }
@@ -808,6 +846,25 @@
             let replyEl = null;  // 正文容器
             let hasThinking = false;
 
+            // 节流 Markdown 渲染：避免每个 delta 都重新 parse 整段文字导致卡顿
+            let _mdRenderTimer = null;
+            let _mdDirty = false;
+            const MD_THROTTLE_MS = 80; // 最多每 80ms 渲染一次
+
+            function scheduleRender() {
+                _mdDirty = true;
+                if (!_mdRenderTimer) {
+                    _mdRenderTimer = setTimeout(() => {
+                        _mdRenderTimer = null;
+                        if (_mdDirty && replyEl) {
+                            _mdDirty = false;
+                            replyEl.innerHTML = renderMarkdown(replyEl.getAttribute('data-raw') || '');
+                            chatHistory.scrollTop = chatHistory.scrollHeight;
+                        }
+                    }, MD_THROTTLE_MS);
+                }
+            }
+
             try {
                 const payload = { user_word: text || '' };
                 if (attachments.length > 0) payload.attachments = attachments;
@@ -857,9 +914,9 @@
                                         if (hasThinking && thinkingEl) thinkingEl.open = false;
                                         sendBtn.innerText = "输出中...";
                                     }
-                                    // 流式输出时先用纯文本, 完成后再渲染
+                                    // 累积原始文本，节流渲染
                                     replyEl.setAttribute('data-raw', (replyEl.getAttribute('data-raw') || '') + data.text);
-                                    replyEl.innerHTML = renderMarkdown(replyEl.getAttribute('data-raw'));
+                                    scheduleRender();
                                 } else if (eventType === 'replace_all') {
                                     if (!replyEl) {
                                         replyEl = document.createElement('div');
@@ -867,9 +924,9 @@
                                         if (hasThinking && thinkingEl) thinkingEl.open = false;
                                         sendBtn.innerText = "输出中...";
                                     }
-                                    // 整体替换目前积累的内容
+                                    // replace_all 立即渲染（出现频率低，通常是工具卡片）
                                     replyEl.setAttribute('data-raw', data.text);
-                                    replyEl.innerHTML = renderMarkdown(replyEl.getAttribute('data-raw'));
+                                    replyEl.innerHTML = renderMarkdown(data.text);
                                 } else if (eventType === 'done') {
                                     // 处理附加元数据
                                     if (data.auto_task) {
@@ -893,8 +950,10 @@
                 aiBubble.innerHTML = "❌ 网络连接失败：请确保你的终端已经运行了 `uvicorn backend.server:app`！";
                 aiBubble.className = "msg-bubble system-msg";
             } finally {
+                // 清除节流计时器，确保最终完整渲染
+                if (_mdRenderTimer) { clearTimeout(_mdRenderTimer); _mdRenderTimer = null; }
                 aiBubble.classList.remove('streaming-cursor');
-                // 流式完成后, 对整个气泡做最终渲染 (KaTeX 公式)
+                // 流式完成后, 对整个气泡做最终渲染 (Markdown + KaTeX)
                 if (replyEl) {
                     const rawText = replyEl.getAttribute('data-raw') || '';
                     replyEl.innerHTML = renderMarkdown(rawText);
@@ -910,7 +969,7 @@
 
         function renderAutoTaskCard(t) {
             const triggerLabel = t.trigger_type === 'interval' ? '⏱ 间隔' :
-                                t.trigger_type === 'cron' ? '📅 周期' : '📌 一次性';
+                t.trigger_type === 'cron' ? '📅 周期' : '📌 一次性';
             const triggerInfo = formatTriggerArgs(t.trigger_type, t.trigger_args);
             return `<div class="auto-task-card">
                 <span class="auto-task-header">✅ 已创建任务</span>
@@ -924,11 +983,15 @@
             let fileCards = search_res.files.map(f => {
                 const icon = getFileIcon(f.content_type);
                 const size = formatSize(f.size || 0);
+                const matchedHtml = f._matched_tags && f._matched_tags.length > 0
+                    ? `<div style="font-size:8px; color:#0078FF; margin-top:2px;">🎯 ${f._matched_tags.join(', ')}${f._score ? ' (' + f._score + '分)' : ''}</div>`
+                    : '';
                 return `<a href="${f.download_url}" target="_blank" rel="noopener" style="border:1px solid #e8e8e8; padding:4px 6px; border-radius:4px; display:flex; align-items:center; gap:4px; background:#fff; text-decoration:none; color:inherit; min-width:0;">
                     <span style="font-size:12px; flex-shrink:0;">${icon}</span>
                     <div style="flex:1; min-width:0; overflow:hidden;">
                         <div style="font-size:10px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:#333;">${f.original_name}</div>
                         <div style="font-size:9px; color:#aaa;">${size}</div>
+                        ${matchedHtml}
                     </div>
                 </a>`;
             }).join("");
@@ -1050,12 +1113,12 @@
 
             tasks.forEach(task => {
                 const statusClass = task.status === 'running' ? 'badge-running' :
-                                    task.status === 'paused' ? 'badge-paused' : 'badge-completed';
+                    task.status === 'paused' ? 'badge-paused' : 'badge-completed';
                 const statusText = task.status === 'running' ? '▶ 运行中' :
-                                   task.status === 'paused' ? '⏸ 已暂停' : '✅ 已完成';
+                    task.status === 'paused' ? '⏸ 已暂停' : '✅ 已完成';
 
                 const triggerLabel = task.trigger_type === 'interval' ? '⏱ 间隔' :
-                                    task.trigger_type === 'cron' ? '📅 周期' : '📌 一次性';
+                    task.trigger_type === 'cron' ? '📅 周期' : '📌 一次性';
                 const triggerDetail = formatTriggerArgs(task.trigger_type, task.trigger_args);
 
                 const lastRunHtml = task.last_run
@@ -1069,8 +1132,8 @@
                 const pauseBtn = task.status === 'running'
                     ? `<button class="task-btn task-btn-pause" onclick="pauseTask('${task.task_id}')">⏸ 暂停</button>`
                     : task.status === 'paused'
-                    ? `<button class="task-btn task-btn-resume" onclick="resumeTask('${task.task_id}')">▶ 恢复</button>`
-                    : '';
+                        ? `<button class="task-btn task-btn-resume" onclick="resumeTask('${task.task_id}')">▶ 恢复</button>`
+                        : '';
 
                 const card = document.createElement('div');
                 card.className = 'task-card';
@@ -1334,8 +1397,16 @@
                 const data = await res.json();
                 if (data.status === 'ok') {
                     renderFileCards(data.files || []);
-                    if (data.reason) {
-                        showToast({ task_name: '✨ AI 检索完毕', result: data.reason, time: '' });
+                    let toastMsg = data.reason || '';
+                    if (data.search_tags) {
+                        const tagSummary = Object.entries(data.search_tags)
+                            .filter(([_, tags]) => tags.length > 0)
+                            .map(([cat, tags]) => `${cat}: ${tags.join(', ')}`)
+                            .join(' | ');
+                        if (tagSummary) toastMsg += '\n🏷️ ' + tagSummary;
+                    }
+                    if (toastMsg) {
+                        showToast({ task_name: '✨ AI 检索完毕', result: toastMsg, time: '' });
                     }
                 } else {
                     alert('AI 检索失败: ' + (data.message || '未知错误'));
@@ -1364,10 +1435,23 @@
                 return;
             }
             files.forEach(f => {
-                const hasTags = f.tags && f.tags.length > 0;
-                const tagsHtml = hasTags
-                    ? (f.tags || []).map(t => `<span class="file-tag">${t}</span>`).join('')
-                    : '<span class="file-tag" style="opacity:0.6; animation: pulse 1.5s infinite;">⏳ 标签生成中...</span>';
+                // 优先用分类标签，兜底用扁平标签
+                const cats = f.categorized_tags || {};
+                const hasCats = cats && (Object.values(cats).some(arr => arr && arr.length > 0));
+                let tagsHtml;
+                if (hasCats) {
+                    const catIcons = { file_type: '📄', author: '👤', location: '📍', description: '💬' };
+                    tagsHtml = Object.entries(cats).map(([cat, tags]) => {
+                        if (!tags || tags.length === 0) return '';
+                        const icon = catIcons[cat] || '🏷️';
+                        return tags.map(t => `<span class="file-tag" title="${cat}">${icon} ${t}</span>`).join('');
+                    }).join('');
+                } else if (f.tags && f.tags.length > 0) {
+                    tagsHtml = f.tags.map(t => `<span class="file-tag">${t}</span>`).join('');
+                } else {
+                    tagsHtml = '<span class="file-tag" style="opacity:0.6; animation: pulse 1.5s infinite;">⏳ 标签生成中...</span>';
+                }
+                const scoreHtml = f._score ? `<span style="font-size:10px; color:#0078FF; font-weight:600;">🎯 ${f._score}分</span>` : '';
                 const card = document.createElement('div');
                 card.className = 'file-card';
                 card.setAttribute('data-object-name', f.object_name);
@@ -1375,11 +1459,13 @@
                     <div class="file-card-header">
                         <span class="file-card-icon">${getFileIcon(f.content_type)}</span>
                         <span class="file-card-name" title="${f.original_name}">${f.original_name}</span>
+                        ${scoreHtml}
                     </div>
                     <div class="file-card-desc">${f.description || '无描述'}</div>
                     <div class="file-card-tags">${tagsHtml}</div>
                     <div class="file-card-meta">
                         <span>${formatSize(f.size)}</span>
+                        ${f.file_date ? `<span>📅 ${f.file_date}</span>` : ''}
                         <span>${(f.uploaded_at || '').substring(0, 16).replace('T', ' ')}</span>
                     </div>
                     <div class="file-card-actions">
@@ -1439,7 +1525,7 @@
             currentSearchMode = mode;
             document.querySelectorAll('.search-mode-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
             const input = document.getElementById('music-search-input');
-            const placeholders = {name:'输入歌曲名称...', ai:'描述你的心情或场景，如：下雨天适合听的安静歌曲...', tag:'输入标签关键词，如：电子、流行...'};
+            const placeholders = { name: '输入歌曲名称...', ai: '描述你的心情或场景，如：下雨天适合听的安静歌曲...', tag: '输入标签关键词，如：电子、流行...' };
             input.placeholder = placeholders[mode] || '';
             input.value = '';
         }
@@ -1651,7 +1737,7 @@
 
             // 封面
             const coverEl = document.getElementById('fp-cover-img');
-            coverEl.innerHTML = `<img src="${coverArt}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" onerror="this.outerHTML='🎵'; this.parentElement.style.background='${coverGrad}'">`;
+            coverEl.innerHTML = `<img src="${coverArt}" style="width:100%;height:100%;object-fit:cover;" onerror="this.outerHTML='🎵'; this.parentElement.style.background='${coverGrad}'">`;
             coverEl.style.background = 'transparent';
 
             // 加载歌词
@@ -1753,14 +1839,16 @@
             document.getElementById('player-play-btn').textContent = '▶';
             document.getElementById('fp-play-btn').textContent = '▶';
             document.getElementById('music-player-bar').classList.remove('is-playing');
-            document.getElementById('fp-vinyl').classList.remove('fp-spinning');
+            const sqCover = document.getElementById('fp-square-cover');
+            if (sqCover) sqCover.classList.remove('is-playing');
         });
 
         audioPlayer.addEventListener('play', () => {
             document.getElementById('player-play-btn').textContent = '⏸';
             document.getElementById('fp-play-btn').textContent = '⏸';
             document.getElementById('music-player-bar').classList.add('is-playing');
-            document.getElementById('fp-vinyl').classList.add('fp-spinning');
+            const sqCover = document.getElementById('fp-square-cover');
+            if (sqCover) sqCover.classList.add('is-playing');
         });
 
         audioPlayer.volume = 0.8;
@@ -1787,9 +1875,11 @@
 
         // ====== 歌词功能 ======
 
+        let currentActiveLyricIndex = -1;
+
         function parseLRC(lrcText) {
             const lines = lrcText.split('\n');
-            const result = [];
+            const timeMap = new Map();
             const timeRegex = /\[(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?\]/g;
             for (const line of lines) {
                 const matches = [...line.matchAll(timeRegex)];
@@ -1800,9 +1890,15 @@
                     const min = parseInt(m[1]);
                     const sec = parseInt(m[2]);
                     const ms = m[3] ? parseInt(m[3].padEnd(3, '0')) : 0;
-                    result.push({ time: min * 60 + sec + ms / 1000, text });
+                    const time = min * 60 + sec + ms / 1000;
+                    if (timeMap.has(time)) {
+                        timeMap.get(time).translation = text;
+                    } else {
+                        timeMap.set(time, { time, text, translation: '' });
+                    }
                 }
             }
+            const result = Array.from(timeMap.values());
             result.sort((a, b) => a.time - b.time);
             return result;
         }
@@ -1810,6 +1906,8 @@
         async function loadLyrics(song) {
             const content = document.getElementById('fp-lyrics-content');
             currentLyrics = [];
+            currentActiveLyricIndex = -1;
+            content.style.transform = 'translateY(0px)';
             content.innerHTML = '<div class="lyrics-empty">⏳ 正在提取歌词...</div>';
 
             try {
@@ -1825,9 +1923,12 @@
                 const parsed = parseLRC(lyricsText);
                 if (parsed.length > 0) {
                     currentLyrics = parsed;
-                    content.innerHTML = parsed.map((l, i) =>
-                        `<div class="lyrics-line" data-index="${i}">${l.text}</div>`
-                    ).join('');
+                    content.innerHTML = parsed.map((l, i) => {
+                        let html = `<div class="lyrics-line" data-index="${i}"><div class="lyrics-text">${l.text}</div>`;
+                        if (l.translation) html += `<div class="lyrics-trans">${l.translation}</div>`;
+                        html += `</div>`;
+                        return html;
+                    }).join('');
                     if (fullscreenOpen && audioPlayer.duration) syncLyrics(audioPlayer.currentTime);
                 } else {
                     content.innerHTML = lyricsText.split('\n')
@@ -1850,13 +1951,24 @@
                     break;
                 }
             }
+
+            if (activeIdx === currentActiveLyricIndex) return;
+            currentActiveLyricIndex = activeIdx;
+
             const lines = document.querySelectorAll('#fp-lyrics-content .lyrics-line');
             lines.forEach((el, i) => {
+                const dist = activeIdx === -1 ? i : i - activeIdx;
+                el.setAttribute('data-dist', dist);
+                el.style.setProperty('--abs-dist', Math.abs(dist));
+
                 if (i === activeIdx) {
                     el.classList.add('lyrics-active');
                     const scroll = document.getElementById('fp-lyrics-scroll');
-                    const offset = el.offsetTop - scroll.offsetTop - scroll.clientHeight / 2 + el.clientHeight / 2;
-                    scroll.scrollTo({ top: offset, behavior: 'smooth' });
+                    const content = document.getElementById('fp-lyrics-content');
+                    // offsetTop 相对 fp-lyrics-content 计算
+                    const offset = el.offsetTop + el.clientHeight / 2;
+                    const center = scroll.clientHeight / 2;
+                    content.style.transform = `translateY(${center - offset}px)`;
                 } else {
                     el.classList.remove('lyrics-active');
                 }

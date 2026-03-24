@@ -488,12 +488,14 @@ def chat_with_ai(request: ChatRequest):
         executed_tools_ui = set()  # Track which tool UI cards have been emitted across ALL sequential tool loop rounds
 
         for _ in range(10):  # 允许更深的循环调用（支持用户要求连抽7张图等场景）
+            skip_temp = "reasoning" in model_caps or "fixed_temp" in model_caps
             stream_kwargs = {
                 "model": current_model,
                 "messages": current_messages,
-                "temperature": 0.7,
                 "stream": True
             }
+            if not skip_temp:
+                stream_kwargs["temperature"] = 0.7
             if mcp_tools:
                 stream_kwargs["tools"] = mcp_tools
 
@@ -524,8 +526,13 @@ def chat_with_ai(request: ChatRequest):
                             # type: ignore
                             tool_calls_buffer[idx]["function"]["arguments"] += tc.function.arguments
 
-                # 检测 reasoning_content（推理思考内容）
-                reasoning = getattr(delta, "reasoning_content", None) or ""
+                # 检测 reasoning_content（推理思考内容，兼容多家模型）
+                reasoning = (
+                    getattr(delta, "reasoning_content", None)
+                    or getattr(delta, "thinking", None)
+                    or getattr(delta, "thinking_content", None)
+                    or ""
+                )
                 if reasoning:
                     thinking_buf += reasoning  # type: ignore[operator]
                     yield f"event: thinking\ndata: {_json.dumps({'text': reasoning}, ensure_ascii=False)}\n\n"
@@ -848,6 +855,7 @@ async def upload_file(
                     "object_name": object_name,
                     "original_name": filename,
                     "tags": result["tags"],
+                    "categorized_tags": result.get("categorized_tags", {}),
                     "file_meta": result.get("file_meta", {}),
                 })
             except Exception as e:
@@ -866,6 +874,77 @@ async def upload_file(
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
+
+@app.post("/api/files/upload_batch")
+async def upload_files_batch(
+    files: list[UploadFile] = File(...),
+    description: str = Form(""),
+):
+    """批量上传多个文件到 MinIO（快速返回，AI 标签后台异步生成）"""
+    if not minio_mgr.enabled:
+        return {"status": "error", "message": "MinIO 未配置"}
+    if not files:
+        return {"status": "error", "message": "未选择任何文件"}
+
+    try:
+        # 1. 读取所有文件数据
+        file_tuples: list[tuple[str, bytes, str, str]] = []
+        for f in files:
+            data = await f.read()
+            file_tuples.append((
+                f.filename or "unnamed",
+                data,
+                f.content_type or "application/octet-stream",
+                description,
+            ))
+
+        # 2. 批量快速上传（一次性写索引）
+        entries = minio_mgr.upload_batch(file_tuples)
+
+        # 3. 后台线程逐个处理元信息 + AI 标签
+        import threading
+
+        def _background_batch_tagging():
+            for i, entry in enumerate(entries):
+                try:
+                    result = minio_mgr.process_tags(
+                        object_name=entry["object_name"],
+                        filename=entry["original_name"],
+                        content_type=entry["content_type"],
+                        description=entry.get("description", ""),
+                    )
+                    broadcast_sync({
+                        "type": "file_tags_ready",
+                        "object_name": entry["object_name"],
+                        "original_name": entry["original_name"],
+                        "tags": result["tags"],
+                        "categorized_tags": result.get("categorized_tags", {}),
+                        "file_meta": result.get("file_meta", {}),
+                        "batch_progress": f"{i + 1}/{len(entries)}",
+                    })
+                except Exception as e:
+                    print(f"[AsyncTag] 批量标签处理失败 ({entry['original_name']}): {e}")
+                    broadcast_sync({
+                        "type": "file_tags_ready",
+                        "object_name": entry["object_name"],
+                        "original_name": entry["original_name"],
+                        "tags": [],
+                        "error": str(e),
+                        "batch_progress": f"{i + 1}/{len(entries)}",
+                    })
+
+        threading.Thread(target=_background_batch_tagging, daemon=True).start()
+
+        return {
+            "status": "ok",
+            "total": len(file_tuples),
+            "uploaded": len(entries),
+            "failed": len(file_tuples) - len(entries),
+            "files": entries,
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
 @app.get("/api/files/search")
 def search_files(q: str = Query("")):
     """搜索文件（按文件名/描述/标签）"""
@@ -880,7 +959,7 @@ class AISearchRequest(BaseModel):
 
 @app.post("/api/files/ai_search")
 def ai_search_files(req: AISearchRequest):
-    """AI 语义检索文件"""
+    """AI 语义检索文件（基于标签池匹配）"""
     if not minio_mgr.enabled:
         return {"status": "error", "message": "MinIO 未配置"}
     try:
@@ -888,6 +967,13 @@ def ai_search_files(req: AISearchRequest):
         return result
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
+@app.get("/api/files/tags")
+def get_file_tags():
+    """获取全局标签池（按分类汇总）"""
+    if not minio_mgr.enabled:
+        return {"status": "error", "message": "MinIO 未配置"}
+    return {"status": "ok", "tags": minio_mgr.get_tag_pool()}
 
 @app.get("/api/files")
 def list_files():
@@ -913,20 +999,38 @@ class PlaylistRequest(BaseModel):
 @app.get("/api/music")
 def list_music():
     """列出所有音频文件"""
-    audio_files = minio_mgr.search_audio()
-    for f in audio_files:
+    try:
+        audio_files = minio_mgr.search_audio()
+        for f in audio_files:
+            f["download_url"] = minio_mgr.get_download_url(f["object_name"])
+
+        # 检查是否有音频缺封面，有则后台触发重索引
+        try:
+            needs_reindex = any(
+                not (f.get("file_meta") or {}).get("cover_art")
+                for f in audio_files
+            )
+            if needs_reindex:
+                import threading
+                threading.Thread(target=minio_mgr.reindex_cover_art, daemon=True).start()
+        except Exception:
+            pass
+
+        return {"songs": audio_files}
+    except Exception as e:
+        return {"songs": [], "error": str(e)}
+
+@app.get("/api/music/search")
+def search_music(q: str = Query("")):
+    """搜索音乐（复用文件管理搜索，过滤只返回音频）"""
+    results = minio_mgr.search(q)
+    audio_results = [
+        f for f in results
+        if minio_mgr._is_audio(f.get("content_type", ""), f.get("original_name", ""))
+    ]
+    for f in audio_results:
         f["download_url"] = minio_mgr.get_download_url(f["object_name"])
-
-    # 检查是否有音频缺封面，有则后台触发重索引
-    needs_reindex = any(
-        not (f.get("file_meta") or {}).get("cover_art")
-        for f in audio_files
-    )
-    if needs_reindex:
-        import threading
-        threading.Thread(target=minio_mgr.reindex_cover_art, daemon=True).start()
-
-    return {"songs": audio_files}
+    return {"songs": audio_results}
 
 @app.post("/api/music/reindex")
 def reindex_music_cover():

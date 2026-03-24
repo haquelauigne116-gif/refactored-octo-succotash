@@ -12,10 +12,6 @@ env/
 
 # ===== 敏感配置文件（含 API Key / AK/SK）=====
 backend/secrets.json
-backend/providers.json
-backend/settings.json
-backend/minio_config.json
-backend/notification.json
 
 # ===== 用户数据 =====
 data/session/

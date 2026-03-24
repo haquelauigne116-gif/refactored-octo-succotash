@@ -919,7 +919,7 @@
 
             // 封面
             const coverEl = document.getElementById('fp-cover-img');
-            coverEl.innerHTML = `<img src="${coverArt}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" onerror="this.outerHTML='🎵'; this.parentElement.style.background='${coverGrad}'">`;
+            coverEl.innerHTML = `<img src="${coverArt}" style="width:100%;height:100%;object-fit:cover;" onerror="this.outerHTML='🎵'; this.parentElement.style.background='${coverGrad}'">`;
             coverEl.style.background = 'transparent';
 
             // 加载歌词
@@ -1016,14 +1016,16 @@
             document.getElementById('player-play-btn').textContent = '▶';
             document.getElementById('fp-play-btn').textContent = '▶';
             document.getElementById('music-player-bar').classList.remove('is-playing');
-            document.getElementById('fp-vinyl').classList.remove('fp-spinning');
+            const sqCover = document.getElementById('fp-square-cover');
+            if (sqCover) sqCover.classList.remove('is-playing');
         });
 
         audioPlayer.addEventListener('play', () => {
             document.getElementById('player-play-btn').textContent = '⏸';
             document.getElementById('fp-play-btn').textContent = '⏸';
             document.getElementById('music-player-bar').classList.add('is-playing');
-            document.getElementById('fp-vinyl').classList.add('fp-spinning');
+            const sqCover = document.getElementById('fp-square-cover');
+            if (sqCover) sqCover.classList.add('is-playing');
         });
 
         audioPlayer.volume = 0.8;
@@ -1050,9 +1052,11 @@
 
         // ====== 歌词功能 ======
 
+        let currentActiveLyricIndex = -1;
+
         function parseLRC(lrcText) {
             const lines = lrcText.split('\n');
-            const result = [];
+            const timeMap = new Map();
             const timeRegex = /\[(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?\]/g;
             for (const line of lines) {
                 const matches = [...line.matchAll(timeRegex)];
@@ -1063,9 +1067,15 @@
                     const min = parseInt(m[1]);
                     const sec = parseInt(m[2]);
                     const ms = m[3] ? parseInt(m[3].padEnd(3, '0')) : 0;
-                    result.push({ time: min * 60 + sec + ms / 1000, text });
+                    const time = min * 60 + sec + ms / 1000;
+                    if (timeMap.has(time)) {
+                        timeMap.get(time).translation = text;
+                    } else {
+                        timeMap.set(time, { time, text, translation: '' });
+                    }
                 }
             }
+            const result = Array.from(timeMap.values());
             result.sort((a, b) => a.time - b.time);
             return result;
         }
@@ -1073,6 +1083,8 @@
         function loadLyrics(song) {
             const lyricsText = (song.file_meta && song.file_meta.lyrics) || '';
             const content = document.getElementById('fp-lyrics-content');
+            currentActiveLyricIndex = -1;
+            content.style.transform = 'translateY(0px)';
 
             if (!lyricsText.trim()) {
                 currentLyrics = [];
@@ -1083,9 +1095,12 @@
             const parsed = parseLRC(lyricsText);
             if (parsed.length > 0) {
                 currentLyrics = parsed;
-                content.innerHTML = parsed.map((l, i) =>
-                    `<div class="lyrics-line" data-index="${i}">${l.text}</div>`
-                ).join('');
+                content.innerHTML = parsed.map((l, i) => {
+                    let html = `<div class="lyrics-line" data-index="${i}"><div class="lyrics-text">${l.text}</div>`;
+                    if (l.translation) html += `<div class="lyrics-trans">${l.translation}</div>`;
+                    html += `</div>`;
+                    return html;
+                }).join('');
             } else {
                 currentLyrics = [];
                 content.innerHTML = lyricsText.split('\n')
@@ -1104,13 +1119,23 @@
                     break;
                 }
             }
+            if (activeIdx === currentActiveLyricIndex) return;
+            currentActiveLyricIndex = activeIdx;
+
             const lines = document.querySelectorAll('#fp-lyrics-content .lyrics-line');
             lines.forEach((el, i) => {
+                const dist = activeIdx === -1 ? i : i - activeIdx;
+                el.setAttribute('data-dist', dist);
+                el.style.setProperty('--abs-dist', Math.abs(dist));
+
                 if (i === activeIdx) {
                     el.classList.add('lyrics-active');
                     const scroll = document.getElementById('fp-lyrics-scroll');
-                    const offset = el.offsetTop - scroll.offsetTop - scroll.clientHeight / 2 + el.clientHeight / 2;
-                    scroll.scrollTo({ top: offset, behavior: 'smooth' });
+                    const content = document.getElementById('fp-lyrics-content');
+                    // offsetTop 相对 fp-lyrics-content 计算
+                    const offset = el.offsetTop + el.clientHeight / 2;
+                    const center = scroll.clientHeight / 2;
+                    content.style.transform = `translateY(${center - offset}px)`;
                 } else {
                     el.classList.remove('lyrics-active');
                 }
