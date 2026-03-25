@@ -146,15 +146,16 @@ class RAGEngine:
 
     def analyze_intent(self, messages: list[dict], current_query: str) -> dict:
         """
-        统一门卫：一次 API 调用同时完成两个判断：
-        1. 是否需要检索知识库？→ 返回搜索关键词或空字符串
-        2. 用户是否在请求创建定时任务？→ 返回任务 dict 或 None
-        3. 用户是否想从MinIO中查找文件？→ 返回文件查询字符串或空字符串
-        4. 用户是否需要调用阿里云MCP服务（画图、搜索、地图、语音）？→ 返回对应的服务名称
+        统一门卫：一次 API 调用同时完成多个判断：
+        1. 是否需要检索知识库？
+        2. 用户是否在请求创建定时任务？
+        3. 用户是否想从MinIO中查找文件？
+        4. 用户是否需要调用阿里云MCP服务？
+        5. 用户是否在创建/查询日程？
 
-        返回: {"rag_query": str, "task_intent": dict | None, "file_search_query": "", "mcp_intent": ""}
+        返回: {"rag_query": str, "task_intent": dict | None, "file_search_query": "", "mcp_intent": "", "schedule_intent": None}
         """
-        result: dict = {"rag_query": "", "task_intent": None, "file_search_query": "", "mcp_intent": ""}
+        result: dict = {"rag_query": "", "task_intent": None, "file_search_query": "", "mcp_intent": "", "schedule_intent": None}
 
         recent: list[dict] = messages[-6:]  # type: ignore[index]
         context_lines = []
@@ -192,6 +193,15 @@ class RAGEngine:
             "- 需要联网查询最新新闻资讯或实时信息（如“今天有什么新闻”、“搜索一下XXX”）：MCP: WEB_SEARCH\n"
             "- 明确要求把文字合成语音发出来或朗读文字（如“朗读这句话”、“转成语音”）：MCP: TTS\n"
             "- 其他所有情况（不需要以上五种服务，或仅是正常文本聊天、知识库聊天）：MCP: NONE\n\n"
+            "【判断5 - 日程管理】\n"
+            "用户是否在创建、修改或查询日程、会议、活动、安排？（注意：定时提醒属于判断2，日程是有起止时间的事件）\n"
+            "- 如果没有涉及日程，输出：SCHEDULE: NONE\n"
+            "- 如果用户要创建日程，输出 SCHEDULE: 后跟 JSON，格式：\n"
+            'SCHEDULE: {"action": "create", "title": "简短标题", "start_time": "YYYY-MM-DDTHH:MM:SS", '
+            '"end_time": "YYYY-MM-DDTHH:MM:SS", "category": "工作|个人|学习|会议|健康|其他", '
+            '"location": "地点或空", "all_day": false}\n'
+            "- 如果用户没说结束时间，默认持续1小时\n"
+            "- 如果用户说'全天'或没有具体时间，设 all_day 为 true\n\n"
             "⚠️ trigger_type 选择规则（非常重要，必须严格遵守）：\n"
             "- date（一次性）：「X分钟后提醒我」「半小时后叫我」「明天下午3点提醒」→ 计算出具体时间点\n"
             "- interval（循环间隔）：「每隔30分钟提醒一次」「每小时提醒喝水」→ 定期重复\n"
@@ -201,11 +211,12 @@ class RAGEngine:
             '- interval → {"seconds": N} 或 {"minutes": N} 或 {"hours": N}\n'
             '- cron → {"hour": "H", "minute": "M"} 可选 "day_of_week": "mon-fri"\n\n'
             f"当前时间: {now_str}（{weekday}）\n\n"
-            "【输出格式】严格输出四行，不要有任何其他内容：\n"
+            "【输出格式】严格输出五行，不要有任何其他内容：\n"
             "RAG: 关键词或NONE\n"
             "TASK: JSON或NONE\n"
             "FILE_SEARCH: 查找描述或NONE\n"
-            "MCP: Z_IMAGE/JIMENG/AMAP/WEB_SEARCH/TTS/NONE"
+            "MCP: Z_IMAGE/JIMENG/AMAP/WEB_SEARCH/TTS/NONE\n"
+            "SCHEDULE: JSON或NONE"
         )
 
         try:
@@ -275,6 +286,31 @@ class RAGEngine:
                         print(f"[IntentAnalysis] ✅ 检测到 MCP 意图: {mcp_val}")
                     else:
                         print(f"[IntentAnalysis] MCP: 不需要外部服务")
+
+                elif line.upper().startswith("SCHEDULE:"):
+                    sch_val = line[9:].strip()
+                    if sch_val.upper() == "NONE":
+                        print("[IntentAnalysis] SCHEDULE: 无日程意图")
+                    else:
+                        try:
+                            json_text = sch_val
+                            if "```" in json_text:
+                                parts = json_text.split("```")
+                                for part in parts:
+                                    s = part.strip()
+                                    if s.startswith("json"):
+                                        s = s[4:].strip()
+                                    if s.startswith("{"):
+                                        json_text = s
+                                        break
+                            sch_data = json.loads(json_text)
+                            if sch_data.get("action") == "create" and "title" in sch_data and "start_time" in sch_data:
+                                result["schedule_intent"] = sch_data
+                                print(f"[IntentAnalysis] ✅ 日程意图: {sch_data['title']}")
+                            else:
+                                print(f"[IntentAnalysis] SCHEDULE JSON 字段不完整: {sch_data}")
+                        except json.JSONDecodeError as e:
+                            print(f"[IntentAnalysis] SCHEDULE JSON 解析失败: {e}")
 
         except Exception as e:
             print(f"[IntentAnalysis] 意图分析异常: {e}")

@@ -268,6 +268,10 @@ class DingTalkChannel(NotificationChannel):
 
     def _format_message(self, data: dict) -> str:
         """将通知数据格式化为文本消息"""
+        msg_type = data.get("type")
+        if msg_type in ["schedule_reminder", "daily_briefing"]:
+            return data.get("result", "")
+
         task_name = data.get("task_name", "未知任务")
         result = data.get("result", "")
         time_str = data.get("time", "")

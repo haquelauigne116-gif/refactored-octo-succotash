@@ -15,6 +15,7 @@ MEMORY_DIR = os.path.join(DATA_DIR, "memory")
 SESSION_DIR = os.path.join(DATA_DIR, "session")
 KNOWLEDGE_DIR = os.path.join(DATA_DIR, "knowledge_base")
 TASKS_FILE = os.path.join(DATA_DIR, "tasks.json")
+SCHEDULE_DB = os.path.join(DATA_DIR, "schedules.db")
 
 MEMORY_FILE = os.path.join(MEMORY_DIR, "memory.md")
 SYSTEM_PROMPT_FILE = os.path.join(MEMORY_DIR, "system_prompt.md")

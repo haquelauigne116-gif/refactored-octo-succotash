@@ -26,6 +26,7 @@
             </div>
             <div class="menu-item" onclick="switchView('task')">任务 📋</div>
             <div class="menu-item" onclick="switchView('files')">文件 📁</div>
+            <div class="menu-item" onclick="switchView('calendar')">日历 📅</div>
             <div class="menu-item" onclick="switchView('music')">音乐 🎵</div>
             <div class="menu-item" onclick="switchView('settings')">设置 ⚙️</div>
         </div>
@@ -244,6 +245,91 @@
             <audio id="audio-player" preload="auto"></audio>
         </div>
 
+        <!-- 日历面板 -->
+        <div id="calendar-view" class="view-container">
+            <div class="cal-toolbar">
+                <div class="cal-toolbar-left">
+                    <button class="cal-nav-btn" onclick="calPrev()" title="上一月">◀</button>
+                    <button class="cal-nav-btn cal-today-btn" onclick="calToday()">今天</button>
+                    <button class="cal-nav-btn" onclick="calNext()" title="下一月">▶</button>
+                    <span class="cal-title" id="cal-title">2026年3月</span>
+                </div>
+                <div class="cal-toolbar-right">
+                    <div class="cal-view-switcher">
+                        <button class="cal-view-btn active" data-view="month" onclick="calSwitchView('month')">月</button>
+                        <button class="cal-view-btn" data-view="week" onclick="calSwitchView('week')">周</button>
+                    </div>
+                    <button class="cal-add-btn" onclick="openScheduleModal()">＋ 新建日程</button>
+                </div>
+            </div>
+            <div class="cal-body" id="cal-body">
+                <!-- 月视图：JS 动态渲染 -->
+            </div>
+        </div>
+
+        <!-- 日程弹窗 -->
+        <div class="modal-overlay" id="schedule-modal" style="display:none;" onclick="closeScheduleModal(event)">
+            <div class="modal-card schedule-modal-card" onclick="event.stopPropagation()">
+                <h3 id="schedule-modal-title" style="margin-bottom: 18px;">📅 新建日程</h3>
+                <input type="hidden" id="schedule-edit-id">
+                <div class="settings-form-row">
+                    <label>标题：</label>
+                    <input type="text" id="sch-title" class="settings-input" placeholder="日程标题">
+                </div>
+                <div class="settings-form-row">
+                    <label>分类：</label>
+                    <select id="sch-category" class="settings-select" onchange="onSchCategoryChange()">
+                        <option value="工作">💼 工作</option>
+                        <option value="会议">🤝 会议</option>
+                        <option value="学习">📚 学习</option>
+                        <option value="个人">🏠 个人</option>
+                        <option value="健康">💪 健康</option>
+                        <option value="其他" selected>📌 其他</option>
+                    </select>
+                </div>
+                <div class="settings-form-row">
+                    <label>全天：</label>
+                    <label style="display:flex;align-items:center;cursor:pointer;">
+                        <input type="checkbox" id="sch-allday" style="width:16px;height:16px;margin:0 8px 0 0;" onchange="onSchAlldayChange()">
+                        <span style="font-size:13px;color:#555;">全天事件</span>
+                    </label>
+                </div>
+                <div class="settings-form-row" id="sch-time-row">
+                    <label>开始：</label>
+                    <input type="datetime-local" id="sch-start" class="settings-input">
+                </div>
+                <div class="settings-form-row" id="sch-end-row">
+                    <label>结束：</label>
+                    <input type="datetime-local" id="sch-end" class="settings-input">
+                </div>
+                <div class="settings-form-row">
+                    <label>地点：</label>
+                    <input type="text" id="sch-location" class="settings-input" placeholder="（可选）">
+                </div>
+                <div class="settings-form-row">
+                    <label>描述：</label>
+                    <textarea id="sch-desc" class="settings-input" rows="2" placeholder="（可选）" style="resize:vertical;font-family:inherit;"></textarea>
+                </div>
+                <div class="settings-form-row">
+                    <label>提前提醒：</label>
+                    <select id="sch-reminder" class="settings-select">
+                        <option value="0">不提醒</option>
+                        <option value="5">5 分钟</option>
+                        <option value="15" selected>15 分钟</option>
+                        <option value="30">30 分钟</option>
+                        <option value="60">1 小时</option>
+                    </select>
+                </div>
+                <div id="sch-conflict-warning" style="display:none;padding:8px 12px;background:#FFF3CD;border-radius:8px;margin-top:8px;font-size:13px;color:#856404;"></div>
+                <div style="display:flex; gap:10px; margin-top:18px; justify-content:flex-end;">
+                    <button class="btn-cancel" id="sch-delete-btn" style="display:none;color:#ef4444;" onclick="deleteScheduleFromModal()">🗑️ 删除</button>
+                    <div style="flex:1;"></div>
+                    <button class="btn-cancel" onclick="closeScheduleModal()">取消</button>
+                    <button class="btn-send" onclick="saveSchedule()">保存</button>
+                </div>
+            </div>
+        </div>
+
         <!-- 新建任务弹窗 -->
         <div class="modal-overlay" id="task-modal" style="display:none;" onclick="closeTaskModal(event)">
             <div class="modal-card" onclick="event.stopPropagation()">
@@ -401,12 +487,13 @@
             document.querySelectorAll('.menu-item').forEach(m => m.classList.remove('active'));
             document.getElementById(viewName + '-view').classList.add('active');
             const menuItems = document.querySelectorAll('.menu-item');
-            const viewMap = { chat: 0, task: 1, files: 2, music: 3, settings: 4 };
+            const viewMap = { chat: 0, task: 1, files: 2, calendar: 3, music: 4, settings: 5 };
             if (viewMap[viewName] !== undefined) menuItems[viewMap[viewName]].classList.add('active');
             if (viewName === 'task') loadTasks();
             if (viewName === 'files') loadFiles();
             if (viewName === 'settings') loadSettings();
             if (viewName === 'music') loadMusic();
+            if (viewName === 'calendar') calendarInit();
         }
 
         function handleEnter(event) {
@@ -932,6 +1019,9 @@
                                     if (data.auto_task) {
                                         appendMessage(renderAutoTaskCard(data.auto_task), "ai-msg event-msg");
                                     }
+                                    if (data.auto_schedule) {
+                                        appendMessage(renderAutoScheduleCard(data.auto_schedule), "ai-msg event-msg");
+                                    }
                                     if (data.file_search_result && data.file_search_result.files && data.file_search_result.files.length > 0) {
                                         appendMessage(renderFileSearchCard(data.file_search_result), "ai-msg event-msg");
                                     }
@@ -978,6 +1068,21 @@
                 <button class="task-btn task-btn-delete" style="margin-left:auto;" onclick="deleteTask('${t.task_id}'); this.closest('.auto-task-card').innerHTML='<span style=color:#999>✖ 已取消</span>'">取消</button>
             </div>`;
         }
+
+        function renderAutoScheduleCard(s) {
+            const catEmoji = {'工作':'💼','会议':'🤝','学习':'📚','个人':'🏠','健康':'💪','其他':'📌'};
+            const emoji = catEmoji[s.category] || '📅';
+            const time = s.all_day ? '全天' : ((s.start_time||'').slice(11,16) + ' - ' + (s.end_time||'').slice(11,16));
+            const date = (s.start_time||'').slice(0,10);
+            const loc = s.location ? ` 📍${s.location}` : '';
+            return `<div class="auto-task-card" style="border-left-color:${s.color||'#4F86F7'}">
+                <span class="auto-task-header">📅 已创建日程</span>
+                <span class="auto-task-name">${emoji} ${s.title}</span>
+                <span class="auto-task-info">📆 ${date} · 🕒 ${time}${loc}</span>
+                <button class="task-btn task-btn-delete" style="margin-left:auto;" onclick="fetch(API_BASE+'/api/schedules/${s.id}',{method:'DELETE'});this.closest('.auto-task-card').innerHTML='<span style=color:#999>✖ 已取消</span>'">取消</button>
+            </div>`;
+        }
+
 
         function renderFileSearchCard(search_res) {
             let fileCards = search_res.files.map(f => {
@@ -1235,6 +1340,15 @@
                         });
                         if (document.getElementById('task-view').classList.contains('active')) {
                             loadTasks();
+                        }
+                    } else if (data.type === 'schedule_reminder' || data.type === 'schedule_created') {
+                        showToast({
+                            task_name: data.task_name || (data.type === 'schedule_reminder' ? '📅 日程提醒' : '📅 日程创建'),
+                            result: data.result || '日程操作成功',
+                            time: data.time || '',
+                        });
+                        if (document.getElementById('calendar-view').classList.contains('active')) {
+                            calRender();
                         }
                     } else if (data.type === 'file_tags_ready') {
                         // 异步标签生成完成 — 更新文件卡片
@@ -1990,6 +2104,269 @@
                 target = target.parentNode;
             }
         });
+
+        // ====== 日历模块 ======
+        let calYear, calMonth, calViewMode = 'month', calSchedules = [];
+        const CAT_COLORS = {
+            '工作':'#4F86F7','个人':'#34C759','学习':'#AF52DE',
+            '其他':'#FF9500','会议':'#FF3B30','健康':'#30D158'
+        };
+        const CAT_CLASS = {
+            '工作':'cal-cat-work','个人':'cal-cat-personal','学习':'cal-cat-study',
+            '其他':'cal-cat-other','会议':'cal-cat-meeting','健康':'cal-cat-health'
+        };
+
+        function calendarInit() {
+            const now = new Date();
+            calYear = now.getFullYear();
+            calMonth = now.getMonth();
+            calRender();
+        }
+        function calPrev() {
+            if (calViewMode === 'month') { calMonth--; if (calMonth < 0) { calMonth = 11; calYear--; } }
+            else { const d = new Date(calYear, calMonth, calWeekStart.getDate() - 7); calYear = d.getFullYear(); calMonth = d.getMonth(); calWeekStart = d; }
+            calRender();
+        }
+        function calNext() {
+            if (calViewMode === 'month') { calMonth++; if (calMonth > 11) { calMonth = 0; calYear++; } }
+            else { const d = new Date(calYear, calMonth, calWeekStart.getDate() + 7); calYear = d.getFullYear(); calMonth = d.getMonth(); calWeekStart = d; }
+            calRender();
+        }
+        function calToday() { const n = new Date(); calYear = n.getFullYear(); calMonth = n.getMonth(); calRender(); }
+        function calSwitchView(mode) {
+            calViewMode = mode;
+            document.querySelectorAll('.cal-view-btn').forEach(b => b.classList.toggle('active', b.dataset.view === mode));
+            calRender();
+        }
+
+        let calWeekStart = null;
+        async function calRender() {
+            const body = document.getElementById('cal-body');
+            const title = document.getElementById('cal-title');
+            // Fetch schedules
+            let start, end;
+            if (calViewMode === 'month') {
+                const first = new Date(calYear, calMonth, 1);
+                const startPad = new Date(first); startPad.setDate(1 - first.getDay());
+                const last = new Date(calYear, calMonth + 1, 0);
+                const endPad = new Date(last); endPad.setDate(last.getDate() + (6 - last.getDay()));
+                start = startPad.toISOString().slice(0,10);
+                end = endPad.toISOString().slice(0,10);
+                title.textContent = `${calYear}年${calMonth+1}月`;
+            } else {
+                const now = new Date();
+                if (!calWeekStart || calWeekStart.getMonth() !== calMonth) {
+                    const d = new Date(calYear, calMonth, now.getDate());
+                    d.setDate(d.getDate() - d.getDay());
+                    calWeekStart = d;
+                }
+                const ws = new Date(calWeekStart);
+                const we = new Date(ws); we.setDate(ws.getDate() + 6);
+                start = ws.toISOString().slice(0,10);
+                end = we.toISOString().slice(0,10);
+                title.textContent = `${ws.getMonth()+1}月${ws.getDate()}日 - ${we.getMonth()+1}月${we.getDate()}日`;
+            }
+            try {
+                const res = await fetch(`${API_BASE}/api/schedules?start=${start}&end=${end}`);
+                const data = await res.json();
+                calSchedules = data.schedules || [];
+            } catch(e) { console.error('加载日程失败:', e); calSchedules = []; }
+
+            if (calViewMode === 'month') renderMonth(body);
+            else renderWeek(body);
+        }
+
+        function renderMonth(body) {
+            const weekdays = ['日','一','二','三','四','五','六'];
+            const first = new Date(calYear, calMonth, 1);
+            const startDay = first.getDay();
+            const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
+            const today = new Date();
+            const todayStr = today.toISOString().slice(0,10);
+
+            let html = '<div class="cal-month-grid">';
+            weekdays.forEach(w => html += `<div class="cal-weekday-header">${w}</div>`);
+
+            const totalCells = Math.ceil((startDay + daysInMonth) / 7) * 7;
+            for (let i = 0; i < totalCells; i++) {
+                const dayNum = i - startDay + 1;
+                const isOther = dayNum < 1 || dayNum > daysInMonth;
+                let dateObj;
+                if (dayNum < 1) dateObj = new Date(calYear, calMonth, dayNum);
+                else if (dayNum > daysInMonth) dateObj = new Date(calYear, calMonth, dayNum);
+                else dateObj = new Date(calYear, calMonth, dayNum);
+                const dateStr = dateObj.toISOString().slice(0,10);
+                const isToday = dateStr === todayStr;
+                const cls = ['cal-day-cell'];
+                if (isOther) cls.push('cal-other-month');
+                if (isToday) cls.push('cal-today');
+
+                const dayEvents = calSchedules.filter(s => s.start_time.slice(0,10) <= dateStr && s.end_time.slice(0,10) >= dateStr);
+
+                html += `<div class="${cls.join(' ')}" onclick="openScheduleModal(null,'${dateStr}')">`;
+                html += `<div class="cal-day-num">${dateObj.getDate()}</div>`;
+                const maxShow = 3;
+                dayEvents.slice(0, maxShow).forEach(ev => {
+                    const catCls = CAT_CLASS[ev.category] || 'cal-cat-other';
+                    const t = ev.all_day ? '' : (ev.start_time.slice(11,16) + ' ');
+                    html += `<div class="cal-event-pill ${catCls}" onclick="event.stopPropagation();openScheduleModal('${ev.id}')" title="${ev.title}">${t}${ev.title}</div>`;
+                });
+                if (dayEvents.length > maxShow) html += `<div class="cal-event-more">+${dayEvents.length - maxShow} 更多</div>`;
+                html += '</div>';
+            }
+            html += '</div>';
+            body.innerHTML = html;
+        }
+
+        function renderWeek(body) {
+            const ws = new Date(calWeekStart);
+            const today = new Date();
+            const todayStr = today.toISOString().slice(0,10);
+            const weekdays = ['日','一','二','三','四','五','六'];
+
+            let html = '<div class="cal-week-grid">';
+            html += '<div class="cal-week-header-cell"></div>';
+            for (let d = 0; d < 7; d++) {
+                const dd = new Date(ws); dd.setDate(ws.getDate() + d);
+                const ds = dd.toISOString().slice(0,10);
+                const cls = ds === todayStr ? 'cal-week-header-cell cal-today-col' : 'cal-week-header-cell';
+                html += `<div class="${cls}">${weekdays[d]} ${dd.getDate()}</div>`;
+            }
+            for (let h = 6; h < 23; h++) {
+                html += `<div class="cal-week-time-label">${String(h).padStart(2,'0')}:00</div>`;
+                for (let d = 0; d < 7; d++) {
+                    const dd = new Date(ws); dd.setDate(ws.getDate() + d);
+                    const ds = dd.toISOString().slice(0,10);
+                    const cls = ds === todayStr ? 'cal-week-cell cal-today-col' : 'cal-week-cell';
+                    // Find events in this hour
+                    const cellEvents = calSchedules.filter(s => {
+                        if (s.start_time.slice(0,10) !== ds) return false;
+                        const sh = parseInt(s.start_time.slice(11,13));
+                        return sh === h;
+                    });
+                    html += `<div class="${cls}" onclick="openScheduleModal(null,'${ds}T${String(h).padStart(2,'0')}:00')">`;
+                    cellEvents.forEach(ev => {
+                        const sh = parseInt(ev.start_time.slice(11,13));
+                        const eh = parseInt(ev.end_time.slice(11,13)) || (sh+1);
+                        const span = Math.max(1, eh - sh);
+                        const catCls = CAT_CLASS[ev.category] || 'cal-cat-other';
+                        html += `<div class="cal-week-event ${catCls}" style="height:${span*48-4}px;" onclick="event.stopPropagation();openScheduleModal('${ev.id}')">${ev.start_time.slice(11,16)} ${ev.title}</div>`;
+                    });
+                    html += '</div>';
+                }
+            }
+            html += '</div>';
+            body.innerHTML = html;
+        }
+
+        // 日程弹窗
+        function openScheduleModal(editId, defaultDate) {
+            const modal = document.getElementById('schedule-modal');
+            const titleEl = document.getElementById('schedule-modal-title');
+            const deleteBtn = document.getElementById('sch-delete-btn');
+            document.getElementById('schedule-edit-id').value = '';
+            document.getElementById('sch-conflict-warning').style.display = 'none';
+
+            if (editId) {
+                // 编辑模式
+                const sch = calSchedules.find(s => s.id === editId);
+                if (!sch) return;
+                titleEl.textContent = '✏️ 编辑日程';
+                deleteBtn.style.display = 'inline-flex';
+                document.getElementById('schedule-edit-id').value = editId;
+                document.getElementById('sch-title').value = sch.title || '';
+                document.getElementById('sch-category').value = sch.category || '其他';
+                document.getElementById('sch-allday').checked = !!sch.all_day;
+                document.getElementById('sch-start').value = (sch.start_time||'').slice(0,16);
+                document.getElementById('sch-end').value = (sch.end_time||'').slice(0,16);
+                document.getElementById('sch-location').value = sch.location || '';
+                document.getElementById('sch-desc').value = sch.description || '';
+                document.getElementById('sch-reminder').value = String(sch.reminder_minutes || 15);
+            } else {
+                // 新建模式
+                titleEl.textContent = '📅 新建日程';
+                deleteBtn.style.display = 'none';
+                document.getElementById('sch-title').value = '';
+                document.getElementById('sch-category').value = '其他';
+                document.getElementById('sch-allday').checked = false;
+                document.getElementById('sch-location').value = '';
+                document.getElementById('sch-desc').value = '';
+                document.getElementById('sch-reminder').value = '15';
+                // 默认时间
+                let dt = defaultDate || new Date().toISOString().slice(0,10);
+                if (dt.length === 10) dt += 'T09:00';
+                document.getElementById('sch-start').value = dt.slice(0,16);
+                const endDt = new Date(dt); endDt.setHours(endDt.getHours()+1);
+                document.getElementById('sch-end').value = endDt.toISOString().slice(0,16);
+            }
+            onSchAlldayChange();
+            modal.style.display = 'flex';
+        }
+        function closeScheduleModal(e) {
+            if (e && e.target !== e.currentTarget) return;
+            document.getElementById('schedule-modal').style.display = 'none';
+        }
+        function onSchAlldayChange() {
+            const allday = document.getElementById('sch-allday').checked;
+            document.getElementById('sch-time-row').style.display = allday ? 'none' : '';
+            document.getElementById('sch-end-row').style.display = allday ? 'none' : '';
+        }
+        function onSchCategoryChange() { /* reserved for future color preview */ }
+
+        async function saveSchedule() {
+            const editId = document.getElementById('schedule-edit-id').value;
+            const allDay = document.getElementById('sch-allday').checked;
+            const data = {
+                title: document.getElementById('sch-title').value.trim(),
+                category: document.getElementById('sch-category').value,
+                all_day: allDay,
+                start_time: allDay ? document.getElementById('sch-start').value.slice(0,10)+'T00:00:00' : document.getElementById('sch-start').value+':00',
+                end_time: allDay ? document.getElementById('sch-start').value.slice(0,10)+'T23:59:59' : document.getElementById('sch-end').value+':00',
+                location: document.getElementById('sch-location').value.trim(),
+                description: document.getElementById('sch-desc').value.trim(),
+                reminder_minutes: parseInt(document.getElementById('sch-reminder').value) || 15
+            };
+            if (!data.title) { alert('请输入日程标题'); return; }
+
+            try {
+                if (editId) {
+                    await fetch(`${API_BASE}/api/schedules/${editId}`, {
+                        method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(data)
+                    });
+                } else {
+                    const res = await fetch(`${API_BASE}/api/schedules`, {
+                        method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(data)
+                    });
+                    const result = await res.json();
+                    if (result.schedule && result.schedule.conflicts && result.schedule.conflicts.length > 0) {
+                        const warn = document.getElementById('sch-conflict-warning');
+                        warn.style.display = 'block';
+                        warn.textContent = `⚠️ 与 ${result.schedule.conflicts.length} 个日程时间冲突`;
+                    }
+                }
+                closeScheduleModal();
+                calRender();
+                if (editId) {
+                    showToast({task_name: '✅ 日程已更新', result: '日程更新成功', time: ''});
+                } else {
+                    showToast({task_name: '📅 日程已创建', result: '新日程创建成功', time: ''});
+                }
+            } catch(e) {
+                alert('保存失败: ' + e.message);
+            }
+        }
+
+        async function deleteScheduleFromModal() {
+            const editId = document.getElementById('schedule-edit-id').value;
+            if (!editId) return;
+            if (!confirm('确定删除该日程？')) return;
+            try {
+                await fetch(`${API_BASE}/api/schedules/${editId}`, { method: 'DELETE' });
+                closeScheduleModal();
+                calRender();
+                showToast({task_name: '🗑️ 日程已删除', result: '日程删除成功', time: ''});
+            } catch(e) { alert('删除失败: ' + e.message); }
+        }
 
     </script>
 </body>

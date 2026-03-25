@@ -21,6 +21,7 @@ data/lyrics/
 data/temp/
 data/minio_index.json
 data/tasks.json
+*.db
 
 # ===== 测试/调试临时文件 =====
 mcp_test_output.txt

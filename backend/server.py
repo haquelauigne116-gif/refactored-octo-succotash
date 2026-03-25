@@ -31,12 +31,14 @@ from backend.dingtalk_handler import DingTalkChatHandler  # type: ignore[import]
 from backend.memory_worker import DailyMemoryWorker  # type: ignore[import]
 from backend.minio_manager import MinIOManager  # type: ignore[import]
 from backend.mcp_manager import mcp_mgr  # type: ignore[import]
+from backend.schedule_manager import ScheduleManager  # type: ignore[import]
 
 # ====== 初始化核心组件 ======
 session_mgr = SessionManager()
 rag = RAGEngine()
 task_scheduler = TaskScheduler()
 minio_mgr = MinIOManager()
+schedule_mgr = ScheduleManager()
 
 # 当前对话模型状态
 current_provider_id = "deepseek"
@@ -116,8 +118,14 @@ async def lifespan(app: FastAPI):
     task_scheduler.notification_manager = notification_mgr
     task_scheduler.start()
 
-    # 注册每日记忆整理 (凌晨 2:00)
+    # 注入日程管理器
+    schedule_mgr.task_scheduler = task_scheduler
+    schedule_mgr.notification_manager = notification_mgr
+
     from apscheduler.triggers.cron import CronTrigger  # type: ignore[import]
+    from apscheduler.triggers.interval import IntervalTrigger  # type: ignore[import]
+
+    # 注册每日记忆整理 (凌晨 2:00)
     memory_worker = DailyMemoryWorker()
     task_scheduler.register_system_job(
         job_id="daily_memory_extraction",
@@ -125,6 +133,22 @@ async def lifespan(app: FastAPI):
         trigger=CronTrigger(hour=2, minute=0),
     )
     print("[System] 每日记忆整理已注册 (凌晨 2:00)")
+
+    # 注册日程提醒轮询 (每分钟扫描一次, 仅占 1 个 job)
+    task_scheduler.register_system_job(
+        job_id="schedule_reminder_poll",
+        func=schedule_mgr.check_and_fire_reminders,
+        trigger=IntervalTrigger(minutes=1),
+    )
+    print("[System] 日程提醒轮询已注册 (每分钟)")
+
+    # 注册每日日程简报 (早上 8:00, 仅占 1 个 job)
+    task_scheduler.register_system_job(
+        job_id="daily_schedule_briefing",
+        func=schedule_mgr.send_daily_briefing,
+        trigger=CronTrigger(hour=8, minute=0),
+    )
+    print("[System] 每日日程简报已注册 (早上 8:00)")
 
     yield
 
@@ -408,6 +432,7 @@ def chat_with_ai(request: ChatRequest):
     intent = rag.analyze_intent(session_mgr.messages, user_text)
     rag_context = rag.retrieve_context(intent["rag_query"])
     task_intent = intent["task_intent"]
+    schedule_intent = intent.get("schedule_intent")
     file_search_query = intent.get("file_search_query")
 
     # --- 第一条消息时初始化文件 ---
@@ -679,6 +704,30 @@ def chat_with_ai(request: ChatRequest):
             except Exception as e:
                 print(f"[AutoTask] 自动创建任务失败: {e}")
 
+        # 自动创建日程
+        if schedule_intent and schedule_intent.get("action") == "create":
+            try:
+                sch_data = {
+                    "title": schedule_intent["title"],
+                    "start_time": schedule_intent["start_time"],
+                    "end_time": schedule_intent.get("end_time", ""),
+                    "description": schedule_intent.get("description", ""),
+                    "category": schedule_intent.get("category", "其他"),
+                    "location": schedule_intent.get("location", ""),
+                    "all_day": schedule_intent.get("all_day", False),
+                }
+                # 如果没有结束时间，默认 1 小时
+                if not sch_data["end_time"]:
+                    from datetime import datetime as _dt, timedelta as _td
+                    start = _dt.fromisoformat(sch_data["start_time"])
+                    sch_data["end_time"] = (start + _td(hours=1)).isoformat()
+                created_sch = schedule_mgr.create(sch_data)
+                broadcast_sync({"type": "schedule_created", "schedule": created_sch})
+                session_mgr.append_event("auto_schedule", created_sch)
+                done_data["auto_schedule"] = created_sch
+            except Exception as e:
+                print(f"[AutoSchedule] 自动创建日程失败: {e}")
+
         # 文件搜索结果
         if search_res_json:
             session_mgr.append_event("file_search", search_res_json)
@@ -764,6 +813,81 @@ def resume_task(task_id: str):
 def delete_task(task_id: str):
     ok = task_scheduler.delete_task(task_id)
     return {"status": "ok" if ok else "error"}
+
+# ====== 日程管理路由 ======
+
+class ScheduleCreateRequest(BaseModel):
+    title: str
+    start_time: str
+    end_time: str
+    description: str = ""
+    all_day: bool = False
+    category: str = "其他"
+    color: str = ""
+    location: str = ""
+    rrule: str = ""
+    reminder_minutes: int = 15
+
+class ScheduleUpdateRequest(BaseModel):
+    title: Optional[str] = None
+    start_time: Optional[str] = None
+    end_time: Optional[str] = None
+    description: Optional[str] = None
+    all_day: Optional[bool] = None
+    category: Optional[str] = None
+    color: Optional[str] = None
+    location: Optional[str] = None
+    rrule: Optional[str] = None
+    reminder_minutes: Optional[int] = None
+    status: Optional[str] = None
+
+class ScheduleParseRequest(BaseModel):
+    text: str
+
+@app.get("/api/schedules")
+def list_schedules(start: str = Query(""), end: str = Query("")):
+    """按时间范围查询日程"""
+    if not start or not end:
+        return {"schedules": schedule_mgr.list_all()}
+    return {"schedules": schedule_mgr.list_range(start, end)}
+
+@app.post("/api/schedules")
+def create_schedule(req: ScheduleCreateRequest):
+    """创建日程"""
+    schedule = schedule_mgr.create(req.model_dump())
+    return {"status": "ok", "schedule": schedule}
+
+@app.put("/api/schedules/{schedule_id}")
+def update_schedule(schedule_id: str, req: ScheduleUpdateRequest):
+    """更新日程"""
+    data = {k: v for k, v in req.model_dump().items() if v is not None}
+    result = schedule_mgr.update(schedule_id, data)
+    if result is None:
+        return {"status": "error", "message": "日程不存在"}
+    return {"status": "ok", "schedule": result}
+
+@app.delete("/api/schedules/{schedule_id}")
+def delete_schedule(schedule_id: str):
+    """删除日程"""
+    ok = schedule_mgr.delete(schedule_id)
+    return {"status": "ok" if ok else "error"}
+
+@app.get("/api/schedules/today")
+def get_today_briefing():
+    """获取今日日程摘要"""
+    briefing = schedule_mgr.generate_daily_briefing()
+    from datetime import date as _date
+    today = _date.today().isoformat()
+    schedules = schedule_mgr.list_range(today, today)
+    return {"briefing": briefing, "schedules": schedules}
+
+@app.post("/api/schedules/parse")
+def parse_schedule_text(req: ScheduleParseRequest):
+    """AI 解析自然语言为日程 JSON"""
+    result = schedule_mgr.parse_natural_language(req.text)
+    if result:
+        return {"status": "ok", "schedule_data": result}
+    return {"status": "error", "message": "无法解析日程信息"}
 
 # ====== 通知通道路由 ======
 
