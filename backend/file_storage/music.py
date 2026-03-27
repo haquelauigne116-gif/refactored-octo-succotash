@@ -174,8 +174,8 @@ def reindex_cover_art(all_audio: list[dict], index, storage) -> int:
 def _classify_intent(prompt: str) -> list[str]:
     """Stage 0: 判断用户需求涉及哪些标签类别，减少传给 Stage 1 的标签池体积"""
     try:
-        provider = APP_SETTINGS.get("summary_provider", "deepseek")
-        model = APP_SETTINGS.get("summary_model", "deepseek-chat")
+        provider = APP_SETTINGS.get("file_provider", "deepseek")
+        model = APP_SETTINGS.get("file_model", "deepseek-chat")
         ai_client = get_client(provider)
 
         resp = ai_client.chat.completions.create(
@@ -236,8 +236,8 @@ def _select_tags_from_pool(
     output_format = json.dumps({c: {"标签名": 0.8} for c in tag_pool.keys()}, ensure_ascii=False)
 
     try:
-        provider = APP_SETTINGS.get("summary_provider", "deepseek")
-        model = APP_SETTINGS.get("summary_model", "deepseek-chat")
+        provider = APP_SETTINGS.get("file_provider", "deepseek")
+        model = APP_SETTINGS.get("file_model", "deepseek-chat")
         ai_client = get_client(provider)
 
         resp = ai_client.chat.completions.create(
@@ -374,8 +374,8 @@ def generate_playlist(
     print(f"[Music] Stage2 传入 {len(candidates)} 首候选给 AI 精选")
 
     try:
-        provider = APP_SETTINGS.get("summary_provider", "deepseek")
-        model = APP_SETTINGS.get("summary_model", "deepseek-chat")
+        provider = APP_SETTINGS.get("file_provider", "deepseek")
+        model = APP_SETTINGS.get("file_model", "deepseek-chat")
         ai_client = get_client(provider)
 
         resp = ai_client.chat.completions.create(

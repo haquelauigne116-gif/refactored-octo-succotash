@@ -544,7 +544,7 @@ class MCPManager:
     async def _execute_jimeng(self, tool_name: str, args: dict) -> str:
         """执行即梦 AI 图片/视频生成工具。"""
         import asyncio
-        from backend.volcengine_service import jimeng_service  # type: ignore[import]
+        from backend.integrations.volcengine_service import jimeng_service  # type: ignore[import]
 
         prompt = args.get("prompt", "")
         if not prompt:

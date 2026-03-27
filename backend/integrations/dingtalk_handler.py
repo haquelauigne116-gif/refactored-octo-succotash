@@ -9,8 +9,8 @@ from backend.config import (  # type: ignore[import]
     SYSTEM_PROMPT, MEMORY_FILE,
     get_client, APP_SETTINGS,
 )
-from backend.session_manager import SessionManager  # type: ignore[import]
-from backend.rag_engine import RAGEngine  # type: ignore[import]
+from backend.ai.session_manager import SessionManager  # type: ignore[import]
+from backend.ai.rag_engine import RAGEngine  # type: ignore[import]
 
 logger = logging.getLogger(__name__)
 
@@ -180,10 +180,9 @@ class DingTalkChatHandler:
 
         # --- 调用 AI ---
         try:
-            from backend.config import API_PROVIDERS  # type: ignore[import]
-            first_provider = list(API_PROVIDERS.keys())[0] if API_PROVIDERS else "deepseek"
-            client = get_client(first_provider)
-            model = API_PROVIDERS[first_provider]["models"][0]["id"]
+            provider = APP_SETTINGS.get("chat_provider", "deepseek")
+            client = get_client(provider)
+            model = APP_SETTINGS.get("chat_model", "deepseek-chat")
 
             response = client.chat.completions.create(
                 model=model,
@@ -216,7 +215,7 @@ class DingTalkChatHandler:
         # --- 自主创建定时任务（来自意图分析） ---
         if task_intent:
             try:
-                from backend.task_scheduler import TaskScheduler  # type: ignore[import]
+                from backend.scheduling.task_scheduler import TaskScheduler  # type: ignore[import]
                 scheduler = self._get_scheduler()
                 if scheduler:
                     created = scheduler.create_task(

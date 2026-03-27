@@ -477,6 +477,16 @@
                         <select id="judge-model-select" class="settings-select"></select>
                         <span style="font-size:12px;color:#888;margin-left:10px;">(用于判断是否触发RAG检索和意图分析)</span>
                     </div>
+                    <div class="settings-form-row">
+                        <label>文件模型：</label>
+                        <select id="file-model-select" class="settings-select"></select>
+                        <span style="font-size:12px;color:#888;margin-left:10px;">(用于文件语义标签提取和音乐检索)</span>
+                    </div>
+                    <div class="settings-form-row">
+                        <label>任务模型：</label>
+                        <select id="task-model-select" class="settings-select"></select>
+                        <span style="font-size:12px;color:#888;margin-left:10px;">(用于智能提炼日程与后台文字生成)</span>
+                    </div>
                 </div>
 
                 <button class="btn-send" style="margin-top: 20px; width: 100%; justify-content: center;"
@@ -491,7 +501,7 @@
     <!-- Toast 弹窗容器 (右上角堆叠) -->
     <div id="toast-container"></div>
 
-    <script src="/static/script.js"></script>
+    <script type="module" src="/static/script.js"></script>
 </body>
 
 </html>

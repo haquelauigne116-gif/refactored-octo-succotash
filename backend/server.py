@@ -6,6 +6,7 @@ from typing import Optional
 
 import asyncio
 import os
+import threading
 import uuid as _uuid
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, Form, Query  # type: ignore[import]
@@ -14,6 +15,11 @@ from fastapi.staticfiles import StaticFiles  # type: ignore[import]
 from fastapi.responses import FileResponse, StreamingResponse  # type: ignore[import]
 from pydantic import BaseModel  # type: ignore[import]
 
+# 修复 Windows 下 ES Module 的 MIME 类型问题
+import mimetypes
+mimetypes.add_type('application/javascript', '.js')
+mimetypes.add_type('text/css', '.css')
+
 from backend.config import (  # type: ignore[import]
     SYSTEM_PROMPT, INDEX_HTML, FRONTEND_DIR,
     API_PROVIDERS, APP_SETTINGS, SESSION_DIR,
@@ -21,17 +27,18 @@ from backend.config import (  # type: ignore[import]
     MEMORY_FILE,
     load_notification_config, save_notification_config,
 )
-from backend.session_manager import SessionManager  # type: ignore[import]
-from backend.rag_engine import RAGEngine  # type: ignore[import]
-from backend.task_scheduler import TaskScheduler  # type: ignore[import]
-from backend.notification_manager import (  # type: ignore[import]
+from backend.ai.session_manager import SessionManager  # type: ignore[import]
+from backend.ai.rag_engine import RAGEngine  # type: ignore[import]
+from backend.scheduling.task_scheduler import TaskScheduler  # type: ignore[import]
+from backend.integrations.notification_manager import (  # type: ignore[import]
     NotificationManager, WebSocketChannel, DingTalkChannel,
 )
-from backend.dingtalk_handler import DingTalkChatHandler  # type: ignore[import]
-from backend.memory_worker import DailyMemoryWorker  # type: ignore[import]
+from backend.integrations.dingtalk_handler import DingTalkChatHandler  # type: ignore[import]
+from backend.ai.memory_worker import DailyMemoryWorker  # type: ignore[import]
 from backend.file_storage import MinIOManager  # type: ignore[import]
-from backend.mcp_manager import mcp_mgr  # type: ignore[import]
-from backend.schedule_manager import ScheduleManager  # type: ignore[import]
+from backend.integrations.mcp_manager import mcp_mgr  # type: ignore[import]
+from backend.scheduling.schedule_manager import ScheduleManager  # type: ignore[import]
+
 
 # ====== 初始化核心组件 ======
 session_mgr = SessionManager()
@@ -40,9 +47,9 @@ task_scheduler = TaskScheduler()
 minio_mgr = MinIOManager()
 schedule_mgr = ScheduleManager()
 
-# 当前对话模型状态
-current_provider_id = "deepseek"
-current_model = "deepseek-chat"
+# 当前对话模型状态 (从配置中读取持久化状态)
+current_provider_id = APP_SETTINGS.get("chat_provider", "deepseek")
+current_model = APP_SETTINGS.get("chat_model", "deepseek-chat")
 
 if API_PROVIDERS:
     if current_provider_id not in API_PROVIDERS:
@@ -198,6 +205,12 @@ def switch_provider(request: ProviderRequest):
     current_provider_id = request.provider_id
     current_model = request.model_id
     client = get_client(current_provider_id)
+    
+    # 持久化主聊天模型设置
+    APP_SETTINGS["chat_provider"] = current_provider_id
+    APP_SETTINGS["chat_model"] = current_model
+    save_settings(APP_SETTINGS)
+
     return {"status": "ok", "provider": current_provider_id, "model": current_model}
 
 # ====== 设置路由 ======
@@ -213,10 +226,16 @@ def get_system_settings():
 
 class SettingsUpdateRequest(BaseModel):
     api_keys: dict
+    chat_provider: str = ""
+    chat_model: str = ""
     summary_provider: str
     summary_model: str
     judge_provider: str
     judge_model: str
+    file_provider: str
+    file_model: str
+    task_provider: str
+    task_model: str
     bailian_api_key: str = ""
     enable_mcp_for_chat: bool = False
     max_tool_loops: int = 6
@@ -234,10 +253,24 @@ def update_system_settings(req: SettingsUpdateRequest):
         save_providers_config(API_PROVIDERS)
 
     # 更新系统设置
+    if req.chat_provider and req.chat_model:
+        APP_SETTINGS["chat_provider"] = req.chat_provider
+        APP_SETTINGS["chat_model"] = req.chat_model
+        global current_provider_id, current_model, client
+        current_provider_id = req.chat_provider
+        current_model = req.chat_model
+        try:
+            client = get_client(current_provider_id)
+        except Exception:
+            pass
     APP_SETTINGS["summary_provider"] = req.summary_provider
     APP_SETTINGS["summary_model"] = req.summary_model
     APP_SETTINGS["judge_provider"] = req.judge_provider
     APP_SETTINGS["judge_model"] = req.judge_model
+    APP_SETTINGS["file_provider"] = req.file_provider
+    APP_SETTINGS["file_model"] = req.file_model
+    APP_SETTINGS["task_provider"] = req.task_provider
+    APP_SETTINGS["task_model"] = req.task_model
     APP_SETTINGS["bailian_api_key"] = req.bailian_api_key
     APP_SETTINGS["enable_mcp_for_chat"] = req.enable_mcp_for_chat
     APP_SETTINGS["max_tool_loops"] = max(1, min(req.max_tool_loops, 20))  # 限制范围 1-20

@@ -84,8 +84,8 @@ def generate_categorized_tags(
         meta_file_date = str(file_meta["taken_at"])[:10]
 
     try:
-        provider = APP_SETTINGS.get("summary_provider", "deepseek")
-        model = APP_SETTINGS.get("summary_model", "deepseek-chat")
+        provider = APP_SETTINGS.get("file_provider", "deepseek")
+        model = APP_SETTINGS.get("file_model", "deepseek-chat")
         ai_client = get_client(provider)
 
         # 构建元信息上下文

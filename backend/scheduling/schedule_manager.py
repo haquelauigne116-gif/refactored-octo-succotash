@@ -12,8 +12,8 @@ from datetime import datetime, timedelta, date
 from typing import Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from backend.task_scheduler import TaskScheduler
-    from backend.notification_manager import NotificationManager
+    from backend.scheduling.task_scheduler import TaskScheduler
+    from backend.integrations.notification_manager import NotificationManager
 
 from backend.config import SCHEDULE_DB, get_client, APP_SETTINGS  # type: ignore[import]
 
@@ -360,8 +360,8 @@ class ScheduleManager:
         schedule_text = "\n".join(items)
 
         try:
-            client = get_client(APP_SETTINGS["summary_provider"])
-            model = APP_SETTINGS["summary_model"]
+            client = get_client(APP_SETTINGS["task_provider"])
+            model = APP_SETTINGS["task_model"]
             resp = client.chat.completions.create(
                 model=model,
                 messages=[
@@ -437,8 +437,8 @@ class ScheduleManager:
         )
 
         try:
-            client = get_client(APP_SETTINGS["judge_provider"])
-            model = APP_SETTINGS["judge_model"]
+            client = get_client(APP_SETTINGS["task_provider"])
+            model = APP_SETTINGS["task_model"]
             resp = client.chat.completions.create(
                 model=model,
                 messages=[

@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from backend.notification_manager import NotificationManager  # type: ignore[import]
+    from backend.integrations.notification_manager import NotificationManager  # type: ignore[import]
 
 from apscheduler.schedulers.background import BackgroundScheduler  # type: ignore[import]
 from apscheduler.triggers.date import DateTrigger  # type: ignore[import]
@@ -147,8 +147,8 @@ class TaskScheduler:
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         try:
-            client = get_client(APP_SETTINGS["summary_provider"])
-            model = APP_SETTINGS["summary_model"]
+            client = get_client(APP_SETTINGS["task_provider"])
+            model = APP_SETTINGS["task_model"]
             resp = client.chat.completions.create(
                 model=model,
                 messages=[

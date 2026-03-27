@@ -76,8 +76,8 @@ def ai_search(
     pool_str = json.dumps(tag_pool, ensure_ascii=False)
 
     try:
-        provider = APP_SETTINGS.get("summary_provider", "deepseek")
-        model = APP_SETTINGS.get("summary_model", "deepseek-chat")
+        provider = APP_SETTINGS.get("file_provider", "deepseek")
+        model = APP_SETTINGS.get("file_model", "deepseek-chat")
         ai_client = get_client(provider)
 
         resp = ai_client.chat.completions.create(

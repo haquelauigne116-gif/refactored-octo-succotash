@@ -97,10 +97,16 @@ API_PROVIDERS = load_providers_config()
 # ====== 系统设置 (总结模型、判断模型) ======
 
 _DEFAULT_SETTINGS = {
+    "chat_provider": "deepseek",
+    "chat_model": "deepseek-chat",
     "summary_provider": "deepseek",
     "summary_model": "deepseek-chat",
     "judge_provider": "deepseek",
     "judge_model": "deepseek-chat",
+    "file_provider": "deepseek",
+    "file_model": "deepseek-chat",
+    "task_provider": "deepseek",
+    "task_model": "deepseek-chat",
     "bailian_api_key": "",
     "enable_mcp_for_chat": False,
     "max_tool_loops": 6,
