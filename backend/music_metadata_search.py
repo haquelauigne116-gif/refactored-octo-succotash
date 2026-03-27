@@ -366,17 +366,23 @@ def search_music_metadata(
                 else:
                     logger.warning("[MusicSearch] 歌词写入失败")
 
-    # ── Step 3: MCP 搜索补充元信息 ──
-    query = f"{search_title} {search_artist} 歌曲 专辑 发行时间".strip()
-    logger.info(f"[MusicSearch] MCP 搜索元信息: {query}")
-    meta_results = _mcp_search(query)
-    if meta_results:
-        meta = _extract_metadata_from_results(meta_results)
-        result.update(meta)
-        logger.info(f"[MusicSearch] 元信息: {meta}")
+    # ── Step 2.5: Last.fm 社区标签 ──
+    try:
+        from backend.lastfm_client import get_music_tags  # type: ignore[import]
+        print(f"[LastFM] 开始获取标签: {search_artist} - {search_title}")
+        lastfm_tags = get_music_tags(artist=search_artist, track=search_title)
+        if lastfm_tags:
+            result["lastfm_tags"] = lastfm_tags
+            print(f"[LastFM] 获取到 {len(lastfm_tags)} 个标签: {lastfm_tags}")
+        else:
+            print(f"[LastFM] 未获取到标签")
+    except Exception as e:
+        print(f"[LastFM] 标签获取失败 (不影响上传): {e}")
+        import traceback
+        traceback.print_exc()
 
     if result:
-        result["source"] = "netease+mcp"
+        result["source"] = "netease+lastfm"
         logger.info(
             f"[MusicSearch] 最终结果: "
             f"{ {k: (v[:60] + '...' if isinstance(v, str) and len(v) > 60 else v) for k, v in result.items()} }"

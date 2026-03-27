@@ -30,7 +30,8 @@ _OLD_MINIO_FILE = os.path.join(BASE_DIR, "backend", "minio_config.json")
 _OLD_NOTIFICATION_FILE = os.path.join(BASE_DIR, "backend", "notification.json")
 _OLD_SETTINGS_FILE = os.path.join(BASE_DIR, "backend", "settings.json")
 
-MINIO_INDEX_FILE = os.path.join(DATA_DIR, "minio_index.json")
+MINIO_INDEX_FILE = os.path.join(DATA_DIR, "minio_index.json")  # 旧 JSON 索引（迁移检测用）
+MINIO_INDEX_DB = os.path.join(DATA_DIR, "minio_index.db")      # 新 SQLite 索引
 
 FRONTEND_DIR = os.path.join(BASE_DIR, "frontend")
 INDEX_HTML = os.path.join(FRONTEND_DIR, "index.html")
@@ -102,6 +103,7 @@ _DEFAULT_SETTINGS = {
     "judge_model": "deepseek-chat",
     "bailian_api_key": "",
     "enable_mcp_for_chat": False,
+    "max_tool_loops": 6,
 }
 
 def load_settings() -> dict:
@@ -145,6 +147,11 @@ def load_minio_config() -> dict:
 def load_volcengine_config() -> dict:
     """从 secrets.json 的 volcengine 部分加载"""
     return _SECRETS.get("volcengine", {})
+
+
+def load_lastfm_config() -> dict:
+    """从 secrets.json 的 lastfm 部分加载 API key 和 shared secret"""
+    return _SECRETS.get("lastfm", {})
 
 
 # ====== 通知通道配置 ======

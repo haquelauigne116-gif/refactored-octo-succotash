@@ -283,6 +283,53 @@ class MCPManager:
             
         return loop.run_until_complete(self._fetch_tools_async(intent))
 
+    def get_all_builtin_tools(self) -> list[dict]:
+        """同步获取所有有内置实现的 MCP 工具（不需要远程连接即可加载定义）。
+        包括 type='builtin' 的端点以及虽然有远程端点但也有内置实现的工具。"""
+        if not APP_SETTINGS.get("enable_mcp_for_chat", False):
+            return []
+        all_tools = []
+        # 尝试从所有 intent 获取内置工具定义
+        for intent_key in MCP_ENDPOINTS:
+            try:
+                builtin = self._get_builtin_tools(intent_key)
+                if builtin:
+                    all_tools.extend(builtin)
+            except Exception:
+                pass  # 该 intent 没有内置实现，跳过
+        return all_tools
+
+    def get_all_tools_for_loop(self, detected_intent: str) -> list[dict]:
+        """获取循环所需的所有工具：核心内置工具 + 检测到的远程意图工具。
+        始终加载 JIMENG 和 WEB_SEARCH 供 AI 自主选用。"""
+        if not APP_SETTINGS.get("enable_mcp_for_chat", False):
+            return []
+        tools = []
+        loaded_names: set[str] = set()
+        # 1. 始终加载核心意图的工具（JIMENG + WEB_SEARCH）
+        for core_intent in ["JIMENG", "WEB_SEARCH"]:
+            try:
+                intent_tools = self.get_tools_for_intent(core_intent)
+                for t in intent_tools:
+                    fname = t["function"]["name"]
+                    if fname not in loaded_names:
+                        tools.append(t)
+                        loaded_names.add(fname)
+            except Exception:
+                pass
+        # 2. 如果检测到的意图不在核心集合中，也加载它
+        if detected_intent and detected_intent != "NONE" and detected_intent not in ("JIMENG", "WEB_SEARCH"):
+            try:
+                remote_tools = self.get_tools_for_intent(detected_intent)
+                for t in remote_tools:
+                    fname = t["function"]["name"]
+                    if fname not in loaded_names:
+                        tools.append(t)
+                        loaded_names.add(fname)
+            except Exception:
+                pass
+        return tools
+
     def execute_tool(self, intent: str, tool_name: str, args: dict, session_id: str = "", session_dir: str = "") -> str:
         """同步执行特定意图下的工具调用"""
         try:

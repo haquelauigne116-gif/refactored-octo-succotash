@@ -29,7 +29,7 @@ from backend.notification_manager import (  # type: ignore[import]
 )
 from backend.dingtalk_handler import DingTalkChatHandler  # type: ignore[import]
 from backend.memory_worker import DailyMemoryWorker  # type: ignore[import]
-from backend.minio_manager import MinIOManager  # type: ignore[import]
+from backend.file_storage import MinIOManager  # type: ignore[import]
 from backend.mcp_manager import mcp_mgr  # type: ignore[import]
 from backend.schedule_manager import ScheduleManager  # type: ignore[import]
 
@@ -219,6 +219,7 @@ class SettingsUpdateRequest(BaseModel):
     judge_model: str
     bailian_api_key: str = ""
     enable_mcp_for_chat: bool = False
+    max_tool_loops: int = 6
 
 @app.post("/api/settings")
 def update_system_settings(req: SettingsUpdateRequest):
@@ -239,6 +240,7 @@ def update_system_settings(req: SettingsUpdateRequest):
     APP_SETTINGS["judge_model"] = req.judge_model
     APP_SETTINGS["bailian_api_key"] = req.bailian_api_key
     APP_SETTINGS["enable_mcp_for_chat"] = req.enable_mcp_for_chat
+    APP_SETTINGS["max_tool_loops"] = max(1, min(req.max_tool_loops, 20))  # 限制范围 1-20
     save_settings(APP_SETTINGS)
     return {"status": "ok"}
 
@@ -261,7 +263,7 @@ def switch_session(request: SwitchRequest):
     result = session_mgr.switch_to(request.filename)
     if result is None:
         return {"status": "error", "message": "会话不存在"}
-    return {"status": "ok", "messages": result["messages"], "events": result["events"]}
+    return {"status": "ok", "messages": result["messages"], "events": result["events"], "render_events": result.get("render_events", [])}
 
 # ====== 聊天路由 ======
 
@@ -428,12 +430,10 @@ def chat_with_ai(request: ChatRequest):
         else:
             print(f"[Chat] 文档提取为空: {att.get('name')}")
 
-    # --- 统一意图分析 ---
+    # --- 统一意图分析（仅用于 task/schedule/MCP 检测，RAG/文件搜索移入循环） ---
     intent = rag.analyze_intent(session_mgr.messages, user_text)
-    rag_context = rag.retrieve_context(intent["rag_query"])
     task_intent = intent["task_intent"]
     schedule_intent = intent.get("schedule_intent")
-    file_search_query = intent.get("file_search_query")
 
     # --- 第一条消息时初始化文件 ---
     if session_mgr.is_first_message:
@@ -451,8 +451,17 @@ def chat_with_ai(request: ChatRequest):
     model_caps = get_model_caps(current_provider_id, current_model)
     has_vision = "vision" in model_caps
 
-    # --- 构建 AI 消息列表 ---
-    ai_messages = [m for m in session_mgr.messages if m.get("role") in ("system", "user", "assistant")]
+    # --- 构建 AI 消息列表（清理 HTML 防止模型模仿工具卡片） ---
+    ai_messages = []
+    for m in session_mgr.messages:
+        if m.get("role") not in ("system", "user", "assistant"):
+            continue
+        if m.get("role") == "assistant":
+            cleaned = SessionManager._strip_html_for_chat(m.get("content", ""))
+            if cleaned:
+                ai_messages.append({"role": "assistant", "content": cleaned})
+        else:
+            ai_messages.append(m)
 
     # 图片 + vision 模型 → Vision 格式
     if image_attachments and has_vision:
@@ -479,40 +488,147 @@ def chat_with_ai(request: ChatRequest):
         print(f"[Chat] 注入文档上下文: {len(doc_text_parts)} 个文件")
         ai_messages.insert(-1, {"role": "system", "content": "用户附带了以下文件内容，请结合文件内容回答用户的问题：\n\n" + "\n\n".join(doc_text_parts)})
 
-    if rag_context:
-        ai_messages.insert(-1, {"role": "system", "content": f"以下是从本地知识库检索到的参考资料，请结合这些信息回答用户的问题：{rag_context}"})
-
-    # 文件搜索
-    search_res_json = None
-    if file_search_query:
-        search_res = minio_mgr.ai_search(file_search_query)
-        if search_res.get("status") == "ok" and search_res.get("files"):
-            search_res_json = search_res
-            context_msg = f"系统已经根据用户的查找意图【{file_search_query}】从网盘中找出了相关文件，并会以卡片形式附加在你的回复下方。匹配原因：{search_res.get('reason', '')}。\n请你仅用一两句话亲切地告知用户找到了文件（可以适当提及简短原因），**绝对不要**在你的回复中展示文件的名称或下载链接。"
-            ai_messages.insert(-1, {"role": "system", "content": context_msg})
-        else:
-            ai_messages.insert(-1, {"role": "system", "content": f"系统试图在网盘中查找描述为\u201c{file_search_query}\u201d的文件，但未找到匹配项。请在回复中礼貌地告知用户没有找到。"})
-
     # --- SSE 流式生成器 ---
     import json as _json
+    search_res_json = None  # 文件搜索结果（由循环内工具调用填充）
 
     def _sse_generator():
+        from datetime import datetime as _dt
+        import time as _time
+
         thinking_buf = ""
         reply_buf = ""
 
         mcp_intent = intent.get("mcp_intent", "NONE")
-        mcp_tools = mcp_mgr.get_tools_for_intent(mcp_intent)
+        mcp_tools = mcp_mgr.get_all_tools_for_loop(mcp_intent)
         current_messages = list(ai_messages)
-        
+
+        # ====== Plan-Act-Observe 循环配置 ======
+        MAX_LOOPS = int(APP_SETTINGS.get("max_tool_loops", 6))
+        turn_number = session_mgr.get_turn_number()
+        tool_summary_parts: list[str] = []  # 收集工具调用摘要（写入 chat.md）
+        render_cards: list[dict] = []       # 收集渲染用工具卡片
+        render_media: list[str] = []        # 收集渲染用媒体路径
+
+        # 记录用户消息到 ai_context.jsonl
+        session_mgr.append_ai_context({
+            "turn": turn_number,
+            "role": "user",
+            "content": user_text[:500],
+            "ts": _dt.now().isoformat(),
+        })
+
+        # ====== 构建内置工具列表（RAG 搜索 + 文件搜索） ======
+        builtin_tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "_builtin_rag_search",
+                    "description": "搜索用户私有的本地知识库（仅包含用户主动上传的笔记、课件、技术文档等参考资料）。注意：这不是互联网搜索，仅当用户明确要求查询自己上传的资料时才调用。对于通用问题（如天气、新闻、美食推荐等）请使用联网搜索工具。",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "query": {"type": "string", "description": "搜索关键词，3-5 个核心词"}
+                        },
+                        "required": ["query"]
+                    }
+                }
+            },
+        ]
+        if minio_mgr.enabled:
+            builtin_tools.append({
+                "type": "function",
+                "function": {
+                    "name": "_builtin_file_search",
+                    "description": "在云端网盘中搜索用户的文件、照片、文档、音乐等。当用户想查找或定位文件时调用。",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "query": {"type": "string", "description": "文件查找描述，如'去年的旅行照片'、'工作周报'"}
+                        },
+                        "required": ["query"]
+                    }
+                }
+            })
+            builtin_tools.append({
+                "type": "function",
+                "function": {
+                    "name": "_builtin_file_upload",
+                    "description": "将用户在聊天中发送的附件文件保存到云端网盘。当用户明确表示要存储/保存/上传附件到网盘时调用。需要用户在消息中附带文件。",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "description": {"type": "string", "description": "文件描述，用于后续搜索和标签生成，从用户消息中提取关键信息"}
+                        },
+                        "required": ["description"]
+                    }
+                }
+            })
+
+        # 合并所有工具（内置 + MCP）
+        all_tools = builtin_tools + (mcp_tools if mcp_tools else [])
+
         if mcp_tools:
             current_messages.insert(0, {
                 "role": "system",
                 "content": "【重要指令】你已连接外部 MCP 工具。当用户要求画图、搜索或执行任务时，你**必须严格优先调用对应的 Tool**（如 modelstudio_z_image_generation），**绝对禁止**凭空伪造图片链接！只有在你确切执行了工具后即可，后续展示由前端强制完成，你只需文字总结即可。"
             })
 
-        executed_tools_ui = set()  # Track which tool UI cards have been emitted across ALL sequential tool loop rounds
+        # 注入工具使用指引
+        current_messages.insert(0, {
+            "role": "system",
+            "content": (
+                "你拥有以下内置能力，请在需要时主动调用：\n"
+                "1. _builtin_rag_search: 搜索本地知识库（用户上传的笔记/资料）\n"
+                + ("2. _builtin_file_search: 在云端网盘中查找文件/照片/文档\n"
+                   "3. _builtin_file_upload: 将聊天附件保存到云端网盘（用户需附带文件）\n" if minio_mgr.enabled else "")
+                + "\n【Plan→Act→Observe 工作流】\n"
+                "每次回复时，你必须遵循以下流程：\n"
+                "1. **Plan（规划）**: 先用 1-2 句话简要说明你的分析和下一步计划，这段文字会展示给用户看\n"
+                "2. **Act（执行）**: 调用工具获取信息或生成内容\n"
+                "3. **Observe（观察）**: 工具返回结果后，分析其内容，决定是否需要更多操作\n"
+                "\n重要：每次调用工具之前，你必须先输出“💡 分析”前缀的简短思考。例如：\n"
+                "“💡 分析：用户要搜索南京美食然后画图，我先用联网搜索找具体美食名称…”\n"
+                "\n如果用户问题不需要查资料或找文件，直接回答即可，不必调用工具。\n"
+                f"你最多可以进行 {MAX_LOOPS} 轮工具调用循环，请合理规划。"
+            )
+        })
 
-        for _ in range(10):  # 允许更深的循环调用（支持用户要求连抽7张图等场景）
+        executed_tools_ui = set()  # Track which tool UI cards have been emitted
+        nonlocal search_res_json  # 允许循环内填充文件搜索结果
+
+        for loop_round in range(1, MAX_LOOPS + 1):
+            remaining = MAX_LOOPS - loop_round + 1
+
+            # 推送循环进度状态给前端
+            if loop_round > 1:
+                yield f"event: loop_status\ndata: {_json.dumps({'loop': loop_round, 'remaining': remaining, 'max': MAX_LOOPS}, ensure_ascii=False)}\n\n"
+
+            # 注入剩余步数提示（仅在已执行过工具后的后续轮次注入）
+            if loop_round > 1:
+                step_hint = {
+                    "role": "system",
+                    "content": (
+                        f"\n🔍 Observe — 第 {loop_round} 轮（剩余 {remaining} 步）\n"
+                        f"上方的 tool 消息是上一轮工具的返回结果。请你：\n"
+                        f"1. 先输出一段“💡 分析：...”简要说明你从结果中发现了什么\n"
+                        f"2. 然后决定下一步动作：调用更多工具 或 用获得的信息直接回复用户\n"
+                        f"\n示例：\n"
+                        f'“💡 分析：搜索结果显示南京最高的山是紫金山（海拔448.9m），现在用这个具体信息生成图片…”'
+                    ),
+                }
+                current_messages.append(step_hint)
+
+            # 记录 Plan 到 ai_context
+            session_mgr.append_ai_context({
+                "turn": turn_number,
+                "role": "plan",
+                "loop": loop_round,
+                "remaining": remaining,
+                "has_tools": bool(all_tools),
+                "ts": _dt.now().isoformat(),
+            })
+
             skip_temp = "reasoning" in model_caps or "fixed_temp" in model_caps
             stream_kwargs = {
                 "model": current_model,
@@ -521,16 +637,29 @@ def chat_with_ai(request: ChatRequest):
             }
             if not skip_temp:
                 stream_kwargs["temperature"] = 0.7
-            if mcp_tools:
-                stream_kwargs["tools"] = mcp_tools
+            if all_tools:
+                stream_kwargs["tools"] = all_tools
 
             try:
                 stream = client.chat.completions.create(**stream_kwargs)
             except Exception as e:
-                session_mgr.pop_last_message()
-                error_type = type(e).__name__
-                yield f"event: error\ndata: {_json.dumps({'message': f'{error_type}: {str(e)}'}, ensure_ascii=False)}\n\n"
-                return
+                # 某些模型不支持 tools 参数（如 MiniMax），降级为无工具模式重试
+                if "400" in str(e) and "tools" in stream_kwargs:
+                    print(f"[Chat] 模型不支持 tools 参数，降级为无工具模式: {e}")
+                    stream_kwargs.pop("tools", None)
+                    all_tools = []  # 本轮及后续轮次不再注入工具
+                    try:
+                        stream = client.chat.completions.create(**stream_kwargs)
+                    except Exception as e2:
+                        session_mgr.pop_last_message()
+                        error_type = type(e2).__name__
+                        yield f"event: error\ndata: {_json.dumps({'message': f'{error_type}: {str(e2)}'}, ensure_ascii=False)}\n\n"
+                        return
+                else:
+                    session_mgr.pop_last_message()
+                    error_type = type(e).__name__
+                    yield f"event: error\ndata: {_json.dumps({'message': f'{error_type}: {str(e)}'}, ensure_ascii=False)}\n\n"
+                    return
 
             tool_calls_buffer = {}
             has_tool_call = False
@@ -570,10 +699,12 @@ def chat_with_ai(request: ChatRequest):
             
             # --- 单轮流结束，检查是否执行了工具 ---
             if has_tool_call and tool_calls_buffer:
-                # 记录 assistant 消息中的 tool_calls
-                assistant_tc_msg = {
+                # 记录 assistant 消息（包含 Plan 分析文本 + tool_calls）
+                # 保留 AI 的推理文本，使其在后续轮次中可见
+                plan_text = reply_buf.strip() if reply_buf.strip() else None
+                assistant_tc_msg: dict = {
                     "role": "assistant",
-                    "content": None,
+                    "content": plan_text,
                     "tool_calls": list(tool_calls_buffer.values())
                 }
                 current_messages.append(assistant_tc_msg)
@@ -589,6 +720,8 @@ def chat_with_ai(request: ChatRequest):
                         args_dict = {}
                     
                     friendly_name = {
+                        "_builtin_rag_search": "知识库检索",
+                        "_builtin_file_search": "网盘文件搜索",
                         "modelstudio_z_image_generation": "Z-Image 图像生成",
                         "amap_poi_search": "高德地图路线",
                         "zhipu_web_search": "智谱联网搜索",
@@ -626,15 +759,117 @@ def chat_with_ai(request: ChatRequest):
                             reply_buf = reply_buf.replace(success_card, working_card)
                             yield f"event: replace_all\ndata: {_json.dumps({'text': reply_buf}, ensure_ascii=False)}\n\n"
                     
-                    t_result = mcp_mgr.execute_tool(
-                        intent=mcp_intent,
-                        tool_name=t_name,
-                        args=args_dict,
-                        session_id=session_mgr.session_id,
-                        session_dir=session_mgr.session_dir
-                    )
+                    t_start = _time.time()
+                    # 分流执行：内置工具 vs MCP 工具
+                    if t_name == "_builtin_rag_search":
+                        query = args_dict.get("query", "")
+                        rag_result = rag.retrieve_context(query, top_k=3)
+                        if rag_result:
+                            t_result = "知识库检索结果：\n" + rag_result
+                        else:
+                            t_result = "未在知识库中找到相关内容。"
+                    elif t_name == "_builtin_file_search":
+                        query = args_dict.get("query", "")
+                        _search_res = minio_mgr.ai_search(query)
+                        if _search_res.get("status") == "ok" and _search_res.get("files"):
+                            search_res_json = _search_res  # 填充到外部变量
+                            t_result = (
+                                f"已找到匹配文件，将以卡片形式附加在回复下方。"
+                                f"匹配原因：{_search_res.get('reason', '')}。"
+                                f"请仅用一两句话告知用户找到了文件，**不要**展示文件名或下载链接。"
+                            )
+                        else:
+                            t_result = f"在网盘中未找到描述为\u201c{query}\u201d的文件。请告知用户未找到。"
+                    elif t_name == "_builtin_file_upload":
+                        desc = args_dict.get("description", "")
+                        if not attachments:
+                            t_result = "用户没有在消息中附带任何文件，无法上传。请提醒用户在发送消息时附加文件。"
+                        else:
+                            import base64 as _b64_upload
+                            uploaded_names = []
+                            for att in attachments:
+                                att_name = att.get("name", "unnamed")
+                                att_mime = att.get("mime", "application/octet-stream")
+                                att_data = _b64_upload.b64decode(att.get("data", ""))
+                                if not att_data:
+                                    continue
+                                try:
+                                    entry = minio_mgr.upload_fast(
+                                        filename=att_name,
+                                        file_data=att_data,
+                                        content_type=att_mime,
+                                        description=desc,
+                                    )
+                                    uploaded_names.append(f"{att_name} → {entry['object_name']}")
+                                    # 后台处理标签
+                                    _obj = entry["object_name"]
+                                    _ct = att_mime
+                                    def _bg_tag(_o=_obj, _n=att_name, _c=_ct, _d=desc):
+                                        try:
+                                            result = minio_mgr.process_tags(_o, _n, _c, _d)
+                                            broadcast_sync({
+                                                "type": "file_tags_ready",
+                                                "object_name": _o,
+                                                "original_name": _n,
+                                                "tags": result["tags"],
+                                                "categorized_tags": result.get("categorized_tags", {}),
+                                                "file_meta": result.get("file_meta", {}),
+                                            })
+                                        except Exception as _e:
+                                            print(f"[ChatUpload] 标签处理失败: {_e}")
+                                    threading.Thread(target=_bg_tag, daemon=True).start()
+                                except Exception as ue:
+                                    uploaded_names.append(f"{att_name} → 上传失败: {ue}")
+                            t_result = f"已将 {len(uploaded_names)} 个文件保存到云端网盘：{'; '.join(uploaded_names)}。标签正在后台生成中。请告知用户文件已保存成功。"
+                    else:
+                        # 根据工具名自动路由到正确的 MCP intent
+                        _TOOL_TO_INTENT = {
+                            "web_search": "WEB_SEARCH",
+                            "webSearchPro": "WEB_SEARCH",
+                            "webSearchStd": "WEB_SEARCH",
+                            "webSearchSogou": "WEB_SEARCH",
+                            "webSearchQuark": "WEB_SEARCH",
+                            "jimeng_image_generation": "JIMENG",
+                            "jimeng_video_generation": "JIMENG",
+                            "modelstudio_z_image_generation": "Z_IMAGE",
+                            "amap_poi_search": "AMAP",
+                            "maps_weather": "AMAP",
+                            "qwen_tts": "TTS",
+                        }
+                        tool_intent = _TOOL_TO_INTENT.get(t_name, mcp_intent)
+                        t_result = mcp_mgr.execute_tool(
+                            intent=tool_intent,
+                            tool_name=t_name,
+                            args=args_dict,
+                            session_id=session_mgr.session_id,
+                            session_dir=session_mgr.session_dir
+                        )
+                    t_duration_ms = int((_time.time() - t_start) * 1000)
                     
                     t_result_str = str(t_result)
+
+                    # 记录工具观察到 ai_context.jsonl（只存有用信息，不存调用机制）
+                    # 提取简短信息摘要
+                    import re as _re_ctx
+                    _info = t_result_str[:300]
+                    # 去掉 HTML 标签，只保留文本信息
+                    _info = _re_ctx.sub(r'<[^>]+>', '', _info)
+                    # 去掉【重要指令】等内部钩子
+                    _info = _re_ctx.sub(r'【重要指令】.*', '', _info)
+                    _info = _info.strip()
+                    session_mgr.append_ai_context({
+                        "turn": turn_number,
+                        "role": "observation",
+                        "loop": loop_round,
+                        "source": friendly_name,
+                        "info": _info if _info else "ⓘ 无文本返回（媒体已生成）",
+                        "duration_ms": t_duration_ms,
+                        "ts": _dt.now().isoformat(),
+                    })
+
+                    # 收集工具摘要和渲染数据
+                    tool_summary_parts.append(f"{friendly_name} → ✅")
+                    render_cards.append({"name": friendly_name, "status": "success"})
                     
                     # Intercept the HTML from mcp_manager and force layout it without LLM involvement
                     import re
@@ -651,11 +886,20 @@ def chat_with_ai(request: ChatRequest):
                         else:
                             reply_buf = reply_buf.replace(grid_end_marker, f"{img_html}\n{grid_end_marker}")
 
+                        # 收集媒体路径用于 render.jsonl
+                        _img_path_m = re.search(r'href="(/assets/[^"]+)"', img_html)
+                        if _img_path_m:
+                            render_media.append(_img_path_m.group(1))
+
                         # Strip the raw instruction hook out of the LLM context so it doesn't try to regurgitate it
                         context_msg = "✅ 工具调用成功！图片已在界面直接展示给用户，请简要用一两句话评价生成的图片即可，绝对不要再回复任何图片链接。"
                     elif vid_match:
                         vid_html = vid_match.group(0)
                         reply_buf += f"\n<div class=\"media-video\">\n{vid_html}\n</div>\n"
+                        # 收集视频路径
+                        _vid_path_m = re.search(r'src="(/assets/[^"]+)"', vid_html)
+                        if _vid_path_m:
+                            render_media.append(_vid_path_m.group(1))
                         context_msg = "✅ 工具调用成功！视频已在界面直接展示给用户，请简要用一两句话描述生成的视频内容即可，绝对不要再回复任何视频链接。"
                     else:
                         context_msg = t_result_str
@@ -672,6 +916,7 @@ def chat_with_ai(request: ChatRequest):
                         "content": context_msg
                     })
                 
+                print(f"[Chat] Plan-Act-Observe 循环第 {loop_round} 轮完成，剩余 {remaining - 1} 步")
                 # 携带工具结果进行下一轮请求
                 continue
             else:
@@ -679,7 +924,34 @@ def chat_with_ai(request: ChatRequest):
                 break
 
         # --- 流结束后的后处理 ---
-        session_mgr.append_ai_message(reply_buf, thinking=thinking_buf)
+        # 构建工具调用摘要字符串
+        tool_summary = " | ".join(tool_summary_parts) if tool_summary_parts else ""
+        session_mgr.append_ai_message(reply_buf, thinking=thinking_buf, tool_summary=tool_summary)
+
+        # 写入渲染事件到 render.jsonl
+        if render_cards:
+            session_mgr.append_render_event({
+                "turn": turn_number, "type": "tool_cards", "cards": render_cards
+            })
+        if render_media:
+            session_mgr.append_render_event({
+                "turn": turn_number, "type": "media", "paths": render_media
+            })
+        if search_res_json and search_res_json.get("files"):
+            session_mgr.append_render_event({
+                "turn": turn_number, "type": "file_search", "data": search_res_json
+            })
+
+        # 记录 AI 最终回复到 ai_context.jsonl（纯文本，不含 HTML）
+        clean_reply = SessionManager._strip_html_for_chat(reply_buf)
+        session_mgr.append_ai_context({
+            "turn": turn_number,
+            "role": "assistant",
+            "content": clean_reply[:500],
+            "thinking": thinking_buf[:200] if thinking_buf else "",
+            "tool_count": len(tool_summary_parts),
+            "ts": _dt.now().isoformat(),
+        })
 
         if session_mgr.is_first_message:
             session_mgr.mark_first_message_done()
@@ -1073,9 +1345,11 @@ async def upload_files_batch(
 def search_files(q: str = Query("")):
     """搜索文件（按文件名/描述/标签）"""
     results = minio_mgr.search(q)
-    # 为每个结果生成下载链接
+    # 为每个结果生成下载链接，强制开启下载模式并指定原始文件名
     for r in results:
-        r["download_url"] = minio_mgr.get_download_url(r["object_name"])
+        r["download_url"] = minio_mgr.get_download_url(
+            r["object_name"], force_download=True, filename=r.get("original_name")
+        )
     return {"files": results}
 
 class AISearchRequest(BaseModel):
@@ -1104,7 +1378,9 @@ def list_files():
     """列出所有文件"""
     files = minio_mgr.list_files()
     for f in files:
-        f["download_url"] = minio_mgr.get_download_url(f["object_name"])
+        f["download_url"] = minio_mgr.get_download_url(
+            f["object_name"], force_download=True, filename=f.get("original_name")
+        )
     return {"files": files}
 
 @app.delete("/api/files/{object_name:path}")
