@@ -36,8 +36,17 @@ function cancelUpload() {
 async function uploadFile() {
     if (pendingFiles.length === 0) return;
     const btn = document.getElementById('file-upload-btn');
+    const cancelBtn = document.getElementById('file-cancel-btn');
+    const progressWrapper = document.getElementById('upload-progress-wrapper');
+    const progressFill = document.getElementById('upload-progress-fill');
+    const progressText = document.getElementById('upload-progress-text');
+
     btn.disabled = true;
-    btn.textContent = '上传中...';
+    btn.textContent = '准备上传...';
+    cancelBtn.style.display = 'none';
+    progressWrapper.style.display = 'flex';
+    progressFill.style.width = '0%';
+    progressText.textContent = '0%';
 
     const formData = new FormData();
     pendingFiles.forEach(file => {
@@ -45,24 +54,64 @@ async function uploadFile() {
     });
     formData.append('description', document.getElementById('file-description').value);
 
-    try {
-        const res = await fetch(API_BASE + '/api/files/upload_batch', { method: 'POST', body: formData });
-        const data = await res.json();
-        if (data.status === 'ok') {
-            window.showToast({ task_name: '文件上传', result: `✅ ${data.uploaded} 个文件上传成功\n⏳ AI 标签生成中...`, time: '' });
-            pendingFiles = [];
-            document.getElementById('file-desc-row').style.display = 'none';
-            document.getElementById('file-description').value = '';
-            document.getElementById('file-input-hidden').value = '';
-            loadFiles();
-        } else {
-            alert('上传失败: ' + data.message);
+    const xhr = new XMLHttpRequest();
+
+    // 上传进度
+    xhr.upload.addEventListener('progress', (e) => {
+        if (e.lengthComputable) {
+            const pct = Math.round((e.loaded / e.total) * 100);
+            progressFill.style.width = pct + '%';
+            progressText.textContent = pct + '%';
+            btn.textContent = `上传中 ${pct}%`;
         }
-    } catch (e) {
-        alert('网络错误: ' + e);
-    } finally {
+    });
+
+    // 上传完成
+    xhr.addEventListener('load', () => {
+        if (xhr.status === 200) {
+            try {
+                const data = JSON.parse(xhr.responseText);
+                if (data.status === 'ok') {
+                    window.showToast({ task_name: '文件上传', result: `✅ ${data.uploaded} 个文件上传成功\n⏳ AI 标签生成中...`, time: '' });
+                    pendingFiles = [];
+                    document.getElementById('file-desc-row').style.display = 'none';
+                    document.getElementById('file-description').value = '';
+                    document.getElementById('file-input-hidden').value = '';
+                    loadFiles();
+                } else {
+                    alert('上传失败: ' + data.message);
+                }
+            } catch (e) {
+                alert('解析响应失败: ' + e);
+            }
+        } else {
+            alert('上传失败: HTTP ' + xhr.status);
+        }
+        _resetUploadUI();
+    });
+
+    // 网络错误
+    xhr.addEventListener('error', () => {
+        alert('网络错误，上传失败。请检查网络连接后重试。');
+        _resetUploadUI();
+    });
+
+    // 超时（10 分钟）
+    xhr.timeout = 10 * 60 * 1000;
+    xhr.addEventListener('timeout', () => {
+        alert('上传超时（超过 10 分钟），请检查网络或尝试上传较小的文件。');
+        _resetUploadUI();
+    });
+
+    xhr.open('POST', API_BASE + '/api/files/upload_batch');
+    xhr.send(formData);
+
+    function _resetUploadUI() {
         btn.disabled = false;
         btn.textContent = '🚀 上传';
+        cancelBtn.style.display = '';
+        progressWrapper.style.display = 'none';
+        progressFill.style.width = '0%';
     }
 }
 

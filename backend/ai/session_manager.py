@@ -153,6 +153,34 @@ class SessionManager:
         sessions.sort(key=lambda s: s["last_active"], reverse=True)
         return sessions
 
+    def delete_session(self, session_id: str) -> bool:
+        """删除指定会话（文件夹 + 元数据），返回是否成功"""
+        sid = session_id.replace(".md", "")
+        meta = self._load_meta()
+        if sid not in meta:
+            return False
+
+        # 删除会话文件夹
+        session_dir = os.path.join(SESSION_DIR, sid)
+        if os.path.isdir(session_dir):
+            shutil.rmtree(session_dir, ignore_errors=True)
+
+        # 兼容旧格式散落 .md 文件
+        old_file = os.path.join(SESSION_DIR, f"{sid}.md")
+        if os.path.exists(old_file):
+            os.remove(old_file)
+
+        # 删除元数据
+        del meta[sid]
+        self._save_meta(meta)
+        print(f"[SessionManager] 已删除会话: {sid}")
+
+        # 如果删除的是当前活跃会话，创建新会话
+        if sid == self.session_id:
+            self.create_new()
+
+        return True
+
     # ---------- 消息写入与元数据更新 ----------
 
     def append_user_message(self, text: str):

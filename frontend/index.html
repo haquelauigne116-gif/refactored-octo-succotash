@@ -89,6 +89,12 @@
                     <button class="btn-cancel" id="file-cancel-btn" onclick="cancelUpload()">取消</button>
                     <button class="btn-send" id="file-upload-btn" onclick="uploadFile()">🚀 上传</button>
                 </div>
+                <div class="upload-progress-wrapper" id="upload-progress-wrapper" style="display:none;">
+                    <div class="upload-progress-bar">
+                        <div class="upload-progress-fill" id="upload-progress-fill"></div>
+                    </div>
+                    <span class="upload-progress-text" id="upload-progress-text">0%</span>
+                </div>
 
                 <!-- 搜索栏 -->
                 <div class="file-search-bar" style="display: flex; gap: 10px;">
@@ -487,6 +493,38 @@
                         <select id="task-model-select" class="settings-select"></select>
                         <span style="font-size:12px;color:#888;margin-left:10px;">(用于智能提炼日程与后台文字生成)</span>
                     </div>
+                </div>
+
+                <div class="settings-card" style="margin-top: 20px;">
+                    <h3 style="margin-bottom: 15px;">🧠 长期记忆管理</h3>
+                    <p style="font-size: 13px; color: #888; margin-bottom: 12px; line-height: 1.5;">
+                        以下是 AI 从历史对话中自动提取的用户画像。系统每天凌晨 2:00 自动整理，你也可以手动编辑。
+                    </p>
+                    <textarea id="memory-editor" class="memory-editor" rows="10"
+                        placeholder="记忆内容加载中..."></textarea>
+                    <div style="display:flex; gap:10px; margin-top:10px; justify-content:flex-end;">
+                        <button class="btn-cancel" onclick="loadMemory()">↻ 重新加载</button>
+                        <button class="btn-send" onclick="saveMemory()" style="padding: 6px 18px;">💾 保存记忆</button>
+                    </div>
+                    <div id="memory-save-msg"
+                        style="margin-top:8px; text-align:center; color:#10b981; font-weight:bold; display:none; font-size:13px;">
+                        记忆已保存！</div>
+                </div>
+
+                <div class="settings-card" style="margin-top: 20px;">
+                    <h3 style="margin-bottom: 15px;">📝 系统提示词 (System Prompt)</h3>
+                    <p style="font-size: 13px; color: #888; margin-bottom: 12px; line-height: 1.5;">
+                        定义 AI 的角色、语气与行为风格。修改后新会话将使用更新后的提示词。
+                    </p>
+                    <textarea id="prompt-editor" class="memory-editor" rows="12"
+                        placeholder="系统提示词加载中..."></textarea>
+                    <div style="display:flex; gap:10px; margin-top:10px; justify-content:flex-end;">
+                        <button class="btn-cancel" onclick="loadSystemPrompt()">↻ 重新加载</button>
+                        <button class="btn-send" onclick="saveSystemPrompt()" style="padding: 6px 18px;">💾 保存提示词</button>
+                    </div>
+                    <div id="prompt-save-msg"
+                        style="margin-top:8px; text-align:center; color:#10b981; font-weight:bold; display:none; font-size:13px;">
+                        提示词已保存！新会话将使用更新后的提示词。</div>
                 </div>
 
                 <button class="btn-send" style="margin-top: 20px; width: 100%; justify-content: center;"

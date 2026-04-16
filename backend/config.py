@@ -105,6 +105,8 @@ _DEFAULT_SETTINGS = {
     "judge_model": "deepseek-chat",
     "file_provider": "deepseek",
     "file_model": "deepseek-chat",
+    "file_vision_provider": "qianwen",
+    "file_vision_model": "qwen-vl-plus",
     "task_provider": "deepseek",
     "task_model": "deepseek-chat",
     "bailian_api_key": "",

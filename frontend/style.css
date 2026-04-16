@@ -149,6 +149,58 @@ body {
     border-left: 3px solid #0078FF;
 }
 
+/* 会话项布局：名称 + 删除按钮 */
+.session-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.session-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.session-delete-btn {
+    opacity: 0;
+    width: 22px;
+    height: 22px;
+    border: none;
+    background: transparent;
+    color: #cbd5e1;
+    font-size: 11px;
+    cursor: pointer;
+    border-radius: 50%;
+    flex-shrink: 0;
+    line-height: 22px;
+    text-align: center;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    pointer-events: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.session-item:hover .session-delete-btn {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.session-delete-btn:hover {
+    background: #fee2e2;
+    color: #ef4444;
+    transform: scale(1.15);
+    box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.1);
+}
+
+.session-delete-btn:active {
+    transform: scale(0.95);
+}
+
+
 /* ====== 右侧主内容区 ====== */
 .main-content {
     flex: 1;
@@ -548,6 +600,32 @@ body {
 /* 设置内容区域 */
 .settings-content {
     animation: fadeIn 0.3s ease-out;
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+}
+
+/* 记忆 / 系统提示词编辑器 */
+.memory-editor {
+    width: 100%;
+    min-height: 160px;
+    padding: 12px 14px;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    font-size: 13px;
+    font-family: "SF Mono", "Fira Code", "JetBrains Mono", Consolas, monospace;
+    line-height: 1.6;
+    color: #334155;
+    background: #f8fafc;
+    resize: vertical;
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.memory-editor:focus {
+    border-color: #4F86F7;
+    box-shadow: 0 0 0 3px rgba(79, 134, 247, 0.12);
+    background: #fff;
 }
 
 /* 设置卡片 (白底圆角) */
@@ -2857,4 +2935,110 @@ body {
 
 .cal-cat-health {
     background: #30D158;
+}
+
+/* ====== 文件上传进度条 ====== */
+
+.upload-progress-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 0 4px;
+    animation: fadeIn 0.3s ease-out;
+}
+
+.upload-progress-bar {
+    flex: 1;
+    height: 6px;
+    background: #e2e8f0;
+    border-radius: 3px;
+    overflow: hidden;
+    position: relative;
+}
+
+.upload-progress-fill {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, #0078FF, #00C6FF);
+    border-radius: 3px;
+    transition: width 0.3s ease;
+    position: relative;
+}
+
+.upload-progress-fill::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(
+        90deg,
+        transparent,
+        rgba(255, 255, 255, 0.3),
+        transparent
+    );
+    animation: progressShimmer 1.5s infinite;
+}
+
+@keyframes progressShimmer {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+}
+
+.upload-progress-text {
+    font-size: 12px;
+    font-weight: 600;
+    color: #0078FF;
+    min-width: 36px;
+    text-align: right;
+}
+
+/* ====== 记忆/提示词编辑器 ====== */
+
+.memory-editor {
+    width: 100%;
+    min-height: 180px;
+    max-height: 500px;
+    padding: 14px 16px;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    background: #f8fafc;
+    color: #1e293b;
+    font-family: 'Menlo', 'Consolas', 'Monaco', 'Courier New', monospace;
+    font-size: 13px;
+    line-height: 1.7;
+    resize: vertical;
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
+    box-sizing: border-box;
+}
+
+.memory-editor:focus {
+    border-color: #4F86F7;
+    box-shadow: 0 0 0 3px rgba(79, 134, 247, 0.12);
+    background: #fff;
+}
+
+.memory-editor::placeholder {
+    color: #94a3b8;
+    font-style: italic;
+}
+
+/* 自定义滚动条 */
+.memory-editor::-webkit-scrollbar {
+    width: 6px;
+}
+
+.memory-editor::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.memory-editor::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 3px;
+}
+
+.memory-editor::-webkit-scrollbar-thumb:hover {
+    background: #94a3b8;
 }

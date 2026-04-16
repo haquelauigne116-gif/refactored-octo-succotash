@@ -189,3 +189,184 @@ def generate_categorized_tags(
         logger.error(f"[Tagger] AI 分类标签生成失败: {e}")
         meta_cats["file_date"] = meta_file_date  # type: ignore[assignment]
         return meta_cats
+
+
+# ────────────────────────────────────────────────────────
+# 视觉模型标签生成（图片/视频）
+# ────────────────────────────────────────────────────────
+
+def _prepare_image_base64(file_path: str, max_side: int = 1280) -> tuple[str, str]:
+    """读取图片，缩放到 max_side，返回 (base64_str, mime_type)"""
+    from PIL import Image  # type: ignore[import]
+    import base64
+    import io as _io
+
+    img = Image.open(file_path)
+
+    # 如果是 RGBA / P 模式转 RGB（JPEG 不支持透明）
+    if img.mode in ("RGBA", "P", "LA"):
+        img = img.convert("RGB")
+
+    # 等比缩放
+    w, h = img.size
+    if max(w, h) > max_side:
+        ratio = max_side / max(w, h)
+        img = img.resize((int(w * ratio), int(h * ratio)), Image.LANCZOS)
+
+    buf = _io.BytesIO()
+    img.save(buf, format="JPEG", quality=85)
+    b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+    return b64, "image/jpeg"
+
+
+def _extract_video_first_frame(file_path: str) -> str | None:
+    """从视频文件提取第一帧，保存为临时 JPEG，返回路径；失败返回 None"""
+    import tempfile
+    try:
+        import cv2  # type: ignore[import]
+    except ImportError:
+        logger.warning("[Tagger] opencv-python 未安装，跳过视频帧提取")
+        return None
+
+    try:
+        cap = cv2.VideoCapture(file_path)
+        if not cap.isOpened():
+            return None
+        ret, frame = cap.read()
+        cap.release()
+        if not ret or frame is None:
+            return None
+
+        tmp = tempfile.NamedTemporaryFile(suffix=".jpg", delete=False)
+        cv2.imwrite(tmp.name, frame)
+        return tmp.name
+    except Exception as e:
+        logger.warning(f"[Tagger] 视频帧提取失败: {e}")
+        return None
+
+
+def generate_vision_tags(
+    file_path: str,
+    content_type: str,
+    filename: str = "",
+) -> dict[str, list[str]]:
+    """调用视觉模型分析图片/视频内容，生成分类标签
+
+    返回 {file_type: [...], author: [...], location: [...], description: [...]}
+    失败时返回空 dict。
+    """
+    import os as _os
+
+    ct = (content_type or "").lower()
+    is_image = ct.startswith("image/")
+    is_video = ct.startswith("video/")
+
+    if not (is_image or is_video):
+        return {}
+
+    # 检查配置中是否设置了视觉模型
+    vision_provider = APP_SETTINGS.get("file_vision_provider", "")
+    vision_model = APP_SETTINGS.get("file_vision_model", "")
+    if not vision_provider or not vision_model:
+        logger.info("[Tagger] 未配置视觉模型，跳过视觉标签生成")
+        return {}
+
+    # 准备图片 base64
+    frame_tmp: str | None = None
+    try:
+        if is_video:
+            frame_tmp = _extract_video_first_frame(file_path)
+            if not frame_tmp:
+                logger.info("[Tagger] 视频帧提取失败，跳过视觉标签")
+                return {}
+            img_b64, mime = _prepare_image_base64(frame_tmp)
+        else:
+            img_b64, mime = _prepare_image_base64(file_path)
+    except Exception as e:
+        logger.warning(f"[Tagger] 图片预处理失败: {e}")
+        return {}
+
+    try:
+        vision_client = get_client(vision_provider)
+
+        file_hint = f"文件名：{filename}" if filename else ""
+        media_type = "视频（以下是视频的截帧画面）" if is_video else "图片"
+
+        resp = vision_client.chat.completions.create(
+            model=vision_model,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        f"你是一个{media_type}内容分析助手。请仔细观察{media_type}内容，"
+                        "按以下 4 个类别生成丰富且准确的语义标签：\n\n"
+                        "类别说明：\n"
+                        "- file_type: 图片/视频的类型（如 照片、截图、插画、海报、"
+                        "证件照、风景照、美食照、自拍、合影、产品图等）\n"
+                        "- author: 如果能辨识出品牌、文字水印、创作者、"
+                        "知名人物等，列出；否则留空\n"
+                        "- location: 可辨识的地点、城市、国家、场景类型"
+                        "（如 室内、户外、海边、山顶、办公室、餐厅等）\n"
+                        "- description: 图片/视频的主体内容、颜色风格、"
+                        "情感氛围、包含的物体/动物/人物活动、"
+                        "构图特点等丰富的语义描述\n\n"
+                        "每个类别尽量生成 4-8 个简短标签。"
+                        "如果某类别确实无相关信息可留空数组。\n"
+                        "严格按以下 JSON 格式返回，不要输出其他任何内容：\n"
+                        '{"file_type":["..."],"author":["..."],'
+                        '"location":["..."],"description":["..."]}'
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        *(
+                            [{"type": "text", "text": file_hint}]
+                            if file_hint
+                            else []
+                        ),
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:{mime};base64,{img_b64}",
+                            },
+                        },
+                    ],
+                },
+            ],
+            temperature=0.3,
+            stream=False,
+        )
+
+        raw: str = resp.choices[0].message.content.strip()
+
+        # 清理 markdown 代码块
+        if raw.startswith("```"):
+            raw = raw.split("\n", 1)[1] if "\n" in raw else raw[3:]
+            if raw.endswith("```"):
+                raw = raw[:-3]
+            raw = raw.strip()
+
+        result = json.loads(raw)
+        vision_tags: dict[str, list[str]] = {}
+        for cat in ("file_type", "author", "location", "description"):
+            tags = result.get(cat, [])
+            if isinstance(tags, list):
+                vision_tags[cat] = [str(t).strip() for t in tags if str(t).strip()]
+            else:
+                vision_tags[cat] = []
+
+        logger.info(f"[Tagger] 视觉标签生成成功: {filename} → {vision_tags}")
+        return vision_tags
+
+    except Exception as e:
+        logger.error(f"[Tagger] 视觉标签生成失败: {e}")
+        return {}
+    finally:
+        # 清理视频帧临时文件
+        if frame_tmp:
+            try:
+                _os.remove(frame_tmp)
+            except Exception:
+                pass
+

@@ -55,6 +55,18 @@ class MinIOStorage:
             content_type=content_type,
         )
 
+    def put_object_from_file(
+        self, object_name: str, file_path: str, content_type: str
+    ) -> None:
+        """从本地文件直接上传到 MinIO（零内存拷贝）"""
+        assert self.client is not None
+        self.client.fput_object(
+            self.bucket,
+            object_name,
+            file_path,
+            content_type=content_type,
+        )
+
     def fget_object(self, object_name: str, file_path: str) -> None:
         """将 MinIO 对象下载到本地文件"""
         assert self.client is not None

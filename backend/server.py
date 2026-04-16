@@ -123,6 +123,7 @@ async def lifespan(app: FastAPI):
 
     # 注入到任务调度器
     task_scheduler.notification_manager = notification_mgr
+    task_scheduler.mcp_manager = mcp_mgr  # 注入 MCP 管理器，使定时任务支持工具调用
     task_scheduler.start()
 
     # 注入日程管理器
@@ -169,6 +170,7 @@ app.add_middleware(
     allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
+    max_age=3600,
 )
 
 # ====== 页面路由 ======
@@ -234,6 +236,8 @@ class SettingsUpdateRequest(BaseModel):
     judge_model: str
     file_provider: str
     file_model: str
+    file_vision_provider: str = ""
+    file_vision_model: str = ""
     task_provider: str
     task_model: str
     bailian_api_key: str = ""
@@ -269,6 +273,10 @@ def update_system_settings(req: SettingsUpdateRequest):
     APP_SETTINGS["judge_model"] = req.judge_model
     APP_SETTINGS["file_provider"] = req.file_provider
     APP_SETTINGS["file_model"] = req.file_model
+    if req.file_vision_provider:
+        APP_SETTINGS["file_vision_provider"] = req.file_vision_provider
+    if req.file_vision_model:
+        APP_SETTINGS["file_vision_model"] = req.file_vision_model
     APP_SETTINGS["task_provider"] = req.task_provider
     APP_SETTINGS["task_model"] = req.task_model
     APP_SETTINGS["bailian_api_key"] = req.bailian_api_key
@@ -297,6 +305,14 @@ def switch_session(request: SwitchRequest):
     if result is None:
         return {"status": "error", "message": "会话不存在"}
     return {"status": "ok", "messages": result["messages"], "events": result["events"], "render_events": result.get("render_events", [])}
+
+@app.post("/delete_session")
+def delete_session(request: SwitchRequest):
+    ok = session_mgr.delete_session(request.filename)
+    if not ok:
+        return {"status": "error", "message": "会话不存在"}
+    return {"status": "ok"}
+
 
 # ====== 聊天路由 ======
 
@@ -735,6 +751,29 @@ def chat_with_ai(request: ChatRequest):
                 # 记录 assistant 消息（包含 Plan 分析文本 + tool_calls）
                 # 保留 AI 的推理文本，使其在后续轮次中可见
                 plan_text = reply_buf.strip() if reply_buf.strip() else None
+
+                # 从 reply_buf 中删除中间推理文本（Plan/分析），只保留工具卡片和媒体 HTML
+                import re as _re_strip
+                _tools_html = ""
+                _tools_match = _re_strip.search(r'<div class="tool-cards-row">.*?</div><!-- END_TOOLS -->', reply_buf, flags=_re_strip.DOTALL)
+                if _tools_match:
+                    _tools_html = _tools_match.group(0)
+                _media_html = ""
+                _media_match = _re_strip.search(r'<div class="media-grid">.*?</div><!-- END_MEDIA_GRID -->', reply_buf, flags=_re_strip.DOTALL)
+                if _media_match:
+                    _media_html = _media_match.group(0)
+                _video_html = ""
+                _video_match = _re_strip.search(r'<div class="media-video">.*?</div>', reply_buf, flags=_re_strip.DOTALL)
+                if _video_match:
+                    _video_html = _video_match.group(0)
+                reply_buf = ""
+                if _tools_html:
+                    reply_buf += f"\n{_tools_html}\n"
+                if _media_html:
+                    reply_buf += f"\n{_media_html}\n"
+                if _video_html:
+                    reply_buf += f"\n{_video_html}\n"
+
                 assistant_tc_msg: dict = {
                     "role": "assistant",
                     "content": plan_text,
@@ -1082,7 +1121,67 @@ def serve_session_asset(session_id: str, filename: str):
         raise HTTPException(status_code=404, detail="Asset not found")
     return FileResponse(filepath)
 
+# ====== 记忆与系统提示词管理路由 ======
+
+@app.get("/api/memory")
+def get_memory():
+    """获取 memory.md 内容"""
+    content = ""
+    if os.path.exists(MEMORY_FILE):
+        try:
+            with open(MEMORY_FILE, "r", encoding="utf-8") as f:
+                content = f.read()
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+    return {"status": "ok", "content": content}
+
+class MemoryUpdateRequest(BaseModel):
+    content: str
+
+@app.post("/api/memory")
+def update_memory(req: MemoryUpdateRequest):
+    """保存 memory.md 内容"""
+    try:
+        os.makedirs(os.path.dirname(MEMORY_FILE), exist_ok=True)
+        with open(MEMORY_FILE, "w", encoding="utf-8") as f:
+            f.write(req.content)
+        return {"status": "ok", "message": "记忆已保存"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@app.get("/api/system_prompt")
+def get_system_prompt():
+    """获取 system_prompt.md 内容"""
+    from backend.config import SYSTEM_PROMPT_FILE  # type: ignore[import]
+    content = ""
+    if os.path.exists(SYSTEM_PROMPT_FILE):
+        try:
+            with open(SYSTEM_PROMPT_FILE, "r", encoding="utf-8") as f:
+                content = f.read()
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+    return {"status": "ok", "content": content}
+
+class SystemPromptUpdateRequest(BaseModel):
+    content: str
+
+@app.post("/api/system_prompt")
+def update_system_prompt(req: SystemPromptUpdateRequest):
+    """保存 system_prompt.md 并更新运行时提示词"""
+    from backend.config import SYSTEM_PROMPT_FILE  # type: ignore[import]
+    import backend.config as _cfg  # type: ignore[import]
+    try:
+        os.makedirs(os.path.dirname(SYSTEM_PROMPT_FILE), exist_ok=True)
+        with open(SYSTEM_PROMPT_FILE, "w", encoding="utf-8") as f:
+            f.write(req.content)
+        # 更新运行时的 SYSTEM_PROMPT（后续新会话会使用新提示词）
+        _cfg.SYSTEM_PROMPT = req.content
+        return {"status": "ok", "message": "系统提示词已保存，新会话将使用更新后的提示词"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
 # ====== 定时任务路由 ======
+
 
 class TaskCreateRequest(BaseModel):
     task_name: str
@@ -1245,29 +1344,43 @@ def test_notification():
 
 # ====== 文件管理路由 ======
 
+# 上传临时目录（流式接收大文件用）
+UPLOAD_TEMP_DIR = os.path.join("data", "upload_temp")
+os.makedirs(UPLOAD_TEMP_DIR, exist_ok=True)
+
 @app.post("/api/files/upload")
 async def upload_file(
     file: UploadFile = File(...),
     description: str = Form(""),
 ):
-    """上传文件到 MinIO（快速返回，AI 标签后台异步生成）"""
+    """上传文件到 MinIO（流式写入临时文件，不占用大量内存）"""
     if not minio_mgr.enabled:
         return {"status": "error", "message": "MinIO 未配置"}
-    try:
-        data = await file.read()
-        filename = file.filename or "unnamed"
-        content_type = file.content_type or "application/octet-stream"
 
-        # 1. 快速上传，立即返回
-        entry = minio_mgr.upload_fast(
+    import tempfile
+    filename = file.filename or "unnamed"
+    content_type = file.content_type or "application/octet-stream"
+    ext = os.path.splitext(filename)[1]
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=ext, dir=UPLOAD_TEMP_DIR)
+
+    try:
+        # 1. 流式写入临时文件（每次只占 1MB 内存）
+        file_size = 0
+        while chunk := await file.read(1024 * 1024):  # 1MB chunks
+            tmp.write(chunk)
+            file_size += len(chunk)
+        tmp.close()
+
+        # 2. 从本地文件直接上传到 MinIO（零内存拷贝）
+        entry = minio_mgr.upload_fast_from_file(
             filename=filename,
-            file_data=data,
+            file_path=tmp.name,
+            file_size=file_size,
             content_type=content_type,
             description=description,
         )
 
-        # 2. 后台线程处理元信息提取 + AI 打标签
-        import threading
+        # 3. 后台线程处理元信息提取 + AI 打标签
         object_name = entry["object_name"]
 
         def _background_tagging():
@@ -1278,7 +1391,6 @@ async def upload_file(
                     content_type=content_type,
                     description=description,
                 )
-                # 通过 WebSocket 推送标签就绪通知
                 broadcast_sync({
                     "type": "file_tags_ready",
                     "object_name": object_name,
@@ -1302,6 +1414,13 @@ async def upload_file(
         return {"status": "ok", "file": entry}
     except Exception as e:
         return {"status": "error", "message": str(e)}
+    finally:
+        # 清理临时文件
+        try:
+            if os.path.exists(tmp.name):
+                os.unlink(tmp.name)
+        except Exception:
+            pass
 
 
 @app.post("/api/files/upload_batch")
@@ -1309,30 +1428,37 @@ async def upload_files_batch(
     files: list[UploadFile] = File(...),
     description: str = Form(""),
 ):
-    """批量上传多个文件到 MinIO（快速返回，AI 标签后台异步生成）"""
+    """批量上传多个文件到 MinIO（流式写入临时文件，不占用大量内存）"""
     if not minio_mgr.enabled:
         return {"status": "error", "message": "MinIO 未配置"}
     if not files:
         return {"status": "error", "message": "未选择任何文件"}
 
-    try:
-        # 1. 读取所有文件数据
-        file_tuples: list[tuple[str, bytes, str, str]] = []
-        for f in files:
-            data = await f.read()
-            file_tuples.append((
-                f.filename or "unnamed",
-                data,
-                f.content_type or "application/octet-stream",
-                description,
-            ))
+    import tempfile
+    tmp_paths: list[str] = []  # 用于 finally 清理
 
-        # 2. 批量快速上传（一次性写索引）
-        entries = minio_mgr.upload_batch(file_tuples)
+    try:
+        # 1. 流式写入临时文件（每个文件每次只占 1MB 内存）
+        file_tuples: list[tuple[str, str, int, str, str]] = []
+        for f in files:
+            fname = f.filename or "unnamed"
+            ctype = f.content_type or "application/octet-stream"
+            ext = os.path.splitext(fname)[1]
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=ext, dir=UPLOAD_TEMP_DIR)
+            tmp_paths.append(tmp.name)
+
+            file_size = 0
+            while chunk := await f.read(1024 * 1024):  # 1MB chunks
+                tmp.write(chunk)
+                file_size += len(chunk)
+            tmp.close()
+
+            file_tuples.append((fname, tmp.name, file_size, ctype, description))
+
+        # 2. 批量快速上传（从本地文件直接上传到 MinIO）
+        entries = minio_mgr.upload_batch_from_files(file_tuples)
 
         # 3. 后台线程逐个处理元信息 + AI 标签
-        import threading
-
         def _background_batch_tagging():
             for i, entry in enumerate(entries):
                 try:
@@ -1373,6 +1499,14 @@ async def upload_files_batch(
         }
     except Exception as e:
         return {"status": "error", "message": str(e)}
+    finally:
+        # 清理所有临时文件
+        for p in tmp_paths:
+            try:
+                if os.path.exists(p):
+                    os.unlink(p)
+            except Exception:
+                pass
 
 @app.get("/api/files/search")
 def search_files(q: str = Query("")):

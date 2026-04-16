@@ -18,7 +18,7 @@ from backend.config import (  # type: ignore[import]
 from .index import FileIndex
 from .storage import MinIOStorage
 from .metadata import extract_file_metadata
-from .tagger import generate_categorized_tags, flatten_categorized_tags
+from .tagger import generate_categorized_tags, flatten_categorized_tags, generate_vision_tags
 from . import search as _search
 from . import music as _music
 
@@ -180,7 +180,25 @@ class MinIOManager:
                         f"[MinIO] 联网元信息搜索失败 (不影响上传): {e}"
                     )
 
-            # 3. AI 打分类标签（含 Last.fm 社区标签）
+            # 3. 视觉模型标签（图片/视频）
+            vision_tags: dict[str, list[str]] = {}
+            if file_meta.get("file_type") in ("image", "video"):
+                try:
+                    vision_tags = generate_vision_tags(
+                        file_path=temp_path,
+                        content_type=content_type,
+                        filename=filename,
+                    )
+                    if vision_tags:
+                        logger.info(
+                            f"[MinIO] 视觉标签完成: {filename} → {vision_tags}"
+                        )
+                except Exception as ve:
+                    logger.warning(
+                        f"[MinIO] 视觉标签生成失败 (不影响上传): {ve}"
+                    )
+
+            # 4. AI 打分类标签（含 Last.fm 社区标签）
             lastfm_tags = file_meta.pop("lastfm_tags", None) if file_meta else None
             ai_result = generate_categorized_tags(
                 filename, description, file_meta,
@@ -188,12 +206,24 @@ class MinIOManager:
             )
             file_date = str(ai_result.pop("file_date", "") or "")
             categorized_tags = ai_result
+
+            # 5. 合并视觉标签到分类标签（去重）
+            if vision_tags:
+                for cat in ("file_type", "author", "location", "description"):
+                    existing = categorized_tags.get(cat, [])
+                    seen = {t.lower() for t in existing}
+                    for t in vision_tags.get(cat, []):
+                        if t.lower() not in seen:
+                            seen.add(t.lower())
+                            existing.append(t)
+                    categorized_tags[cat] = existing[:12]  # 合并后限制上限
+
             tags = flatten_categorized_tags(categorized_tags)
 
             # ★ A3: 歌词分离 — 写入索引前移除 lyrics
             file_meta.pop("lyrics", None)
 
-            # 4. 更新索引
+            # 6. 更新索引
             self._index.update_tags(
                 object_name, tags, file_meta,
                 categorized_tags=categorized_tags,
@@ -285,6 +315,77 @@ class MinIOManager:
 
         return entries
 
+    def upload_fast_from_file(
+        self, filename: str, file_path: str, file_size: int,
+        content_type: str, description: str = "",
+    ) -> dict:
+        """快速上传（文件路径版）：直接从本地文件上传到 MinIO，不读入内存"""
+        if not self.enabled:
+            raise RuntimeError("MinIO 未配置")
+
+        ext = os.path.splitext(filename)[1]
+        file_id = self._index.next_id()
+        object_name = f"{file_id:05d}{ext}"
+        uploaded_at = datetime.now().isoformat()
+
+        self._storage.put_object_from_file(object_name, file_path, content_type)
+        logger.info(f"[MinIO] 流式上传成功: {object_name} ← {filename} ({file_size} bytes)")
+
+        entry = {
+            "object_name": object_name,
+            "original_name": filename,
+            "description": description,
+            "tags": [],
+            "content_type": content_type,
+            "size": file_size,
+            "uploaded_at": uploaded_at,
+            "tagging_status": "pending",
+        }
+        self._index.put(entry)
+        return entry
+
+    def upload_batch_from_files(
+        self, files: list[tuple[str, str, int, str, str]],
+    ) -> list[dict]:
+        """批量快速上传（文件路径版），每个元素: (filename, file_path, file_size, content_type, description)"""
+        if not self.enabled:
+            raise RuntimeError("MinIO 未配置")
+
+        entries: list[dict] = []
+        start_id = self._index.next_id()
+
+        for i, (filename, file_path, file_size, content_type, description) in enumerate(files):
+            ext = os.path.splitext(filename)[1]
+            file_id = start_id + i
+            object_name = f"{file_id:05d}{ext}"
+            uploaded_at = datetime.now().isoformat()
+
+            try:
+                self._storage.put_object_from_file(object_name, file_path, content_type)
+            except Exception as e:
+                logger.error(f"[MinIO] 流式批量上传失败 ({filename}): {e}")
+                continue
+
+            entry = {
+                "object_name": object_name,
+                "original_name": filename,
+                "description": description,
+                "tags": [],
+                "content_type": content_type,
+                "size": file_size,
+                "uploaded_at": uploaded_at,
+                "tagging_status": "pending",
+            }
+            entries.append(entry)
+            logger.info(
+                f"[MinIO] 流式批量上传 {len(entries)}: {object_name} ← {filename}"
+            )
+
+        if entries:
+            self._index.put_batch(entries)
+
+        return entries
+
     # ========== 查询操作 ==========
 
     def list_files(self) -> list[dict]:
@@ -305,7 +406,7 @@ class MinIOManager:
             prompt,
             self.list_files(),
             self._index.build_tag_pool(),
-            lambda obj_name: self._storage.get_download_url(obj_name, force_download=True),
+            lambda obj_name, **kw: self._storage.get_download_url(obj_name, **kw),
         )
 
     def get_tag_pool(self) -> dict[str, list[str]]:

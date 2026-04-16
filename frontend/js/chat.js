@@ -143,8 +143,17 @@ async function loadSessions() {
         data.sessions.forEach(s => {
             const div = document.createElement("div");
             div.className = "sub-menu-item session-item" + (s.active ? " active-session" : "");
-            div.textContent = s.name;
-            div.onclick = () => switchSession(s.filename);
+            const nameSpan = document.createElement("span");
+            nameSpan.className = "session-name";
+            nameSpan.textContent = s.name;
+            nameSpan.onclick = () => switchSession(s.filename);
+            div.appendChild(nameSpan);
+            const delBtn = document.createElement("button");
+            delBtn.className = "session-delete-btn";
+            delBtn.innerHTML = `<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><line x1="2" y1="2" x2="10" y2="10"/><line x1="10" y1="2" x2="2" y2="10"/></svg>`;
+            delBtn.title = "删除此会话";
+            delBtn.onclick = (e) => { e.stopPropagation(); deleteSession(s.filename, s.name); };
+            div.appendChild(delBtn);
             sessionList.appendChild(div);
         });
     } catch (e) {
@@ -163,6 +172,25 @@ async function createNewSession() {
         }
     } catch (e) {
         appendMessage("❌ 新建会话失败", "system-msg");
+    }
+}
+
+async function deleteSession(filename, name) {
+    if (!confirm(`确定要删除会话「${name}」吗？\n删除后无法恢复。`)) return;
+    try {
+        const res = await fetch(API_BASE + "/delete_session", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ filename: filename })
+        });
+        const data = await res.json();
+        if (data.status === "ok") {
+            chatHistory.innerHTML = '';
+            appendMessage("你好，我是小鱼！今天需要处理什么工作？", "ai-msg");
+            loadSessions();
+        }
+    } catch (e) {
+        console.error("删除会话失败:", e);
     }
 }
 
@@ -254,7 +282,7 @@ async function switchSession(filename) {
                             mediaHtml = '<div class="media-grid">';
                             evt.paths.forEach(p => {
                                 const thumbP = p.replace(/(\.\w+)$/, '_thumb$1');
-                                mediaHtml += `<a href="${p}" target="_blank"><img src="${thumbP}" alt="AI 生成图片" /></a>`;
+                                mediaHtml += `<a href="${p}" target="_blank"><img src="${thumbP}" alt="AI 生成图片" onerror="if(this.src!=='${p}'){this.src='${p}';}" /></a>`;
                             });
                             mediaHtml += '</div><!-- END_MEDIA_GRID -->';
                         }
@@ -507,7 +535,7 @@ export function renderFileSearchCard(search_res) {
         const size = window.formatSize(f.size || 0);
         const name = f.original_name;
         const scoreHtml = f._score ? `<span class="file-score-badge">✨ ${f._score}分</span>` : '';
-        return `<div class="file-search-item" title="${name}" onclick="${f.download_url ? `window.open('${f.download_url}', '_blank')` : ''}">
+        return `<div class="file-search-item" title="${name}" onclick="window._downloadFile('${f.download_url}', '${name}')">
                     <div class="file-icon-wrapper">${icon}</div>
                     <span class="file-name">${name}</span>
                     <div class="file-size">
@@ -612,6 +640,10 @@ async function loadSettings() {
             taskSelect.value = systemSettingsData.task_provider + '|' + systemSettingsData.task_model;
         }
 
+        // 加载记忆和系统提示词
+        loadMemory();
+        loadSystemPrompt();
+
     } catch (err) {
         console.error("加载设置失败", err);
     }
@@ -689,6 +721,74 @@ async function switchChatModel() {
     }
 }
 
+// ── 记忆管理 ──
+async function loadMemory() {
+    try {
+        const res = await fetch(API_BASE + '/api/memory');
+        const data = await res.json();
+        if (data.status === 'ok') {
+            document.getElementById('memory-editor').value = data.content || '';
+        }
+    } catch (e) {
+        console.error('加载记忆失败:', e);
+    }
+}
+
+async function saveMemory() {
+    const content = document.getElementById('memory-editor').value;
+    try {
+        const res = await fetch(API_BASE + '/api/memory', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ content })
+        });
+        const data = await res.json();
+        if (data.status === 'ok') {
+            const msg = document.getElementById('memory-save-msg');
+            msg.style.display = 'block';
+            setTimeout(() => msg.style.display = 'none', 3000);
+        } else {
+            alert('保存失败: ' + (data.message || '未知错误'));
+        }
+    } catch (e) {
+        alert('保存失败: ' + e);
+    }
+}
+
+// ── 系统提示词管理 ──
+async function loadSystemPrompt() {
+    try {
+        const res = await fetch(API_BASE + '/api/system_prompt');
+        const data = await res.json();
+        if (data.status === 'ok') {
+            document.getElementById('prompt-editor').value = data.content || '';
+        }
+    } catch (e) {
+        console.error('加载系统提示词失败:', e);
+    }
+}
+
+async function saveSystemPrompt() {
+    const content = document.getElementById('prompt-editor').value;
+    try {
+        const res = await fetch(API_BASE + '/api/system_prompt', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ content })
+        });
+        const data = await res.json();
+        if (data.status === 'ok') {
+            const msg = document.getElementById('prompt-save-msg');
+            msg.style.display = 'block';
+            setTimeout(() => msg.style.display = 'none', 3000);
+        } else {
+            alert('保存失败: ' + (data.message || '未知错误'));
+        }
+    } catch (e) {
+        alert('保存失败: ' + e);
+    }
+}
+
 // ── 全局拦截聊天区域内的 A 标签点击事件 ──
 document.getElementById('chat-history').addEventListener('click', function (e) {
     let target = e.target;
@@ -711,14 +811,31 @@ export function initChat() {
     loadSessions();
 }
 
+// ── 无闪烁下载辅助 ──
+function _downloadFile(url, filename) {
+    if (!url) return;
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename || '';
+    a.target = '_blank';
+    a.rel = 'noopener';
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => document.body.removeChild(a), 200);
+}
+
 // ── 导出到全局 (供 HTML 内联 onclick 使用) ──
 Object.assign(window, {
     toggleSubMenu, switchView, handleEnter,
     sendMessage, handleChatFileSelect,
-    createNewSession, switchSession,
+    createNewSession, switchSession, deleteSession,
     loadProviders, loadSessions,
     loadSettings, saveSettings, switchChatModel,
+    loadMemory, saveMemory,
+    loadSystemPrompt, saveSystemPrompt,
     appendMessage, renderMarkdown,
     renderAutoTaskCard, renderAutoScheduleCard, renderFileSearchCard,
+    _downloadFile,
     API_BASE,
 });

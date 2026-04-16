@@ -1,5 +1,6 @@
 import asyncio
 import shutil
+import concurrent.futures
 import httpx  # type: ignore[import]
 from contextlib import AsyncExitStack
 from mcp.client.session import ClientSession  # type: ignore[import]
@@ -230,7 +231,15 @@ class MCPManager:
             return openai_tools
 
         result = await self._connect_and_run(intent, _list)
-        return result if result is not None else []
+        if result is not None:
+            return result
+
+        # 远程连接失败时，尝试使用内置工具定义作为降级方案
+        builtin_fallback = self._get_builtin_tools(intent)
+        if builtin_fallback:
+            print(f"[MCP] 远程服务不可用，已降级为内置工具 ({intent})")
+            return builtin_fallback
+        return []
 
     async def _execute_tool_async(self, intent: str, tool_name: str, args: dict, session_id: str = "", session_dir: str = "") -> str:
         endpoint = MCP_ENDPOINTS.get(intent)
@@ -266,7 +275,34 @@ class MCPManager:
             return out_text
 
         result = await self._connect_and_run(intent, _call)
-        return result if result is not None else f"Error: 工具执行失败 ({tool_name})"
+        if result is not None:
+            return result
+
+        # 远程工具执行失败时，尝试内置实现作为降级
+        try:
+            builtin_result = await self._execute_builtin(intent, tool_name, args)
+            if not builtin_result.startswith("Error: 未知的内置工具"):
+                print(f"[MCP] 远程工具执行失败，已降级为内置实现 ({intent}/{tool_name})")
+                if session_id and session_dir and ("http://" in builtin_result or "https://" in builtin_result):
+                    builtin_result = await self._process_media_downloads(builtin_result, session_id, session_dir)
+                return builtin_result
+        except Exception as fallback_err:
+            print(f"[MCP] 内置工具降级也失败 ({tool_name}): {fallback_err}")
+
+        return f"Error: 工具执行失败 ({tool_name})"
+
+    @staticmethod
+    def _run_async(coro):
+        """在独立线程中运行异步协程，避免与 Uvicorn 事件循环冲突。"""
+        def _run():
+            loop = asyncio.new_event_loop()
+            try:
+                return loop.run_until_complete(coro)
+            finally:
+                loop.close()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(_run)
+            return future.result(timeout=120)
 
     def get_tools_for_intent(self, intent: str) -> list[dict]:
         """同步获取适用于特定意图的 Tools"""
@@ -274,14 +310,8 @@ class MCPManager:
             return []
         if not intent or intent == "NONE":
             return []
-        
-        try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            
-        return loop.run_until_complete(self._fetch_tools_async(intent))
+
+        return self._run_async(self._fetch_tools_async(intent))
 
     def get_all_builtin_tools(self) -> list[dict]:
         """同步获取所有有内置实现的 MCP 工具（不需要远程连接即可加载定义）。
@@ -307,7 +337,7 @@ class MCPManager:
         tools = []
         loaded_names: set[str] = set()
         # 1. 始终加载核心意图的工具（JIMENG + WEB_SEARCH）
-        for core_intent in ["JIMENG", "WEB_SEARCH"]:
+        for core_intent in ["JIMENG", "Z_IMAGE", "WEB_SEARCH"]:
             try:
                 intent_tools = self.get_tools_for_intent(core_intent)
                 for t in intent_tools:
@@ -315,8 +345,8 @@ class MCPManager:
                     if fname not in loaded_names:
                         tools.append(t)
                         loaded_names.add(fname)
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[MCP] 加载核心工具 {core_intent} 失败: {e}")
         # 2. 如果检测到的意图不在核心集合中，也加载它
         if detected_intent and detected_intent != "NONE" and detected_intent not in ("JIMENG", "WEB_SEARCH"):
             try:
@@ -326,19 +356,13 @@ class MCPManager:
                     if fname not in loaded_names:
                         tools.append(t)
                         loaded_names.add(fname)
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[MCP] 加载远程工具 {detected_intent} 失败: {e}")
         return tools
 
     def execute_tool(self, intent: str, tool_name: str, args: dict, session_id: str = "", session_dir: str = "") -> str:
         """同步执行特定意图下的工具调用"""
-        try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            
-        return loop.run_until_complete(self._execute_tool_async(intent, tool_name, args, session_id, session_dir))
+        return self._run_async(self._execute_tool_async(intent, tool_name, args, session_id, session_dir))
 
     # ====== 内置工具实现（无需外部 MCP 服务） ======
 
@@ -687,7 +711,7 @@ class MCPManager:
                         else:
                             thumb_name = filename
 
-                        render_html = f'<a href="/assets/{session_id}/assets/{filename}" target="_blank"><img src="/assets/{session_id}/assets/{thumb_name}" alt="AI 生成图片" /></a>'
+                        render_html = f'<a href="/assets/{session_id}/assets/{filename}" target="_blank"><img src="/assets/{session_id}/assets/{thumb_name}" alt="AI 生成图片" onerror="if(this.src!==\'/assets/{session_id}/assets/{filename}\')this.src=\'/assets/{session_id}/assets/{filename}\';" /></a>'
                         replaced_text = replaced_text.replace(url, render_html)
                         has_image = True
                         print(f"[MCP] 图片已下载: {filename}")

@@ -2,6 +2,7 @@
 notification_manager.py — 多通道通知管理器 (WebSocket + 钉钉 Stream)
 """
 import json
+import re
 import time
 import threading
 import logging
@@ -11,6 +12,9 @@ from typing import Any, Optional, Callable
 import requests  # type: ignore[import]
 
 logger = logging.getLogger(__name__)
+
+# 钉钉单条消息最大字符数（留余量，实际上限约 4000~5000）
+_DINGTALK_MAX_CHARS = 3800
 
 
 # ========== 抽象基类 ==========
@@ -186,8 +190,46 @@ class DingTalkChannel(NotificationChannel):
             logger.error(f"[DingTalk] 发送异常: {e}")
             return False
 
+    # ---------- 消息分片工具 ----------
+
+    @staticmethod
+    def _split_message(content: str, max_len: int = _DINGTALK_MAX_CHARS) -> list[str]:
+        """
+        将超长消息按段落/换行拆分为多条，每条不超过 max_len 个字符。
+        尽量在换行符处切割，避免把一句话切断。
+        """
+        if len(content) <= max_len:
+            return [content]
+
+        chunks: list[str] = []
+        remaining = content
+        part_idx = 0
+
+        while remaining:
+            part_idx += 1
+            if len(remaining) <= max_len:
+                chunks.append(remaining)
+                break
+
+            # 在 max_len 范围内找最后一个换行符
+            cut = remaining[:max_len].rfind("\n")
+            if cut <= 0:
+                # 没有合适的换行符，退而求其次按长度硬切
+                cut = max_len
+
+            chunk = remaining[:cut].rstrip()
+            remaining = remaining[cut:].lstrip("\n")
+            chunks.append(chunk)
+
+        # 如果拆成多条，给每条加上序号
+        if len(chunks) > 1:
+            total = len(chunks)
+            chunks = [f"({i}/{total})\n{c}" for i, c in enumerate(chunks, 1)]
+
+        return chunks
+
     def _send_single(self, token: str, content: str) -> bool:
-        """发送单聊消息 (oToMessages/batchSend)"""
+        """发送单聊消息 (oToMessages/batchSend)，支持自动分片"""
         # 每次发送前重新加载 user_ids（支持运行时自动注册新用户）
         try:
             from backend.config import load_notification_config  # type: ignore[import]
@@ -202,6 +244,16 @@ class DingTalkChannel(NotificationChannel):
             logger.warning("[DingTalk] 未配置 user_ids，无法发送单聊消息")
             return False
 
+        chunks = self._split_message(content)
+        all_ok = True
+        for chunk in chunks:
+            ok = self._send_single_chunk(token, chunk)
+            if not ok:
+                all_ok = False
+        return all_ok
+
+    def _send_single_chunk(self, token: str, content: str) -> bool:
+        """发送一条单聊消息（单次 API 调用）"""
         resp = requests.post(
             "https://api.dingtalk.com/v1.0/robot/oToMessages/batchSend",
             headers={
@@ -211,8 +263,8 @@ class DingTalkChannel(NotificationChannel):
             json={
                 "robotCode": self.robot_code,
                 "userIds": self.user_ids,
-                "msgKey": "sampleText",
-                "msgParam": json.dumps({"content": content}, ensure_ascii=False),
+                "msgKey": "sampleMarkdown",
+                "msgParam": json.dumps({"title": "消息通知", "text": content}, ensure_ascii=False),
             },
             timeout=10,
         )
@@ -225,11 +277,21 @@ class DingTalkChannel(NotificationChannel):
             return False
 
     def _send_group(self, token: str, content: str) -> bool:
-        """发送群聊消息 (groupMessages/send)"""
+        """发送群聊消息 (groupMessages/send)，支持自动分片"""
         if not self.open_conversation_id:
             logger.warning("[DingTalk] 未配置 open_conversation_id，无法发送群消息")
             return False
 
+        chunks = self._split_message(content)
+        all_ok = True
+        for chunk in chunks:
+            ok = self._send_group_chunk(token, chunk)
+            if not ok:
+                all_ok = False
+        return all_ok
+
+    def _send_group_chunk(self, token: str, content: str) -> bool:
+        """发送一条群聊消息（单次 API 调用）"""
         resp = requests.post(
             "https://api.dingtalk.com/v1.0/robot/groupMessages/send",
             headers={
@@ -239,8 +301,8 @@ class DingTalkChannel(NotificationChannel):
             json={
                 "robotCode": self.robot_code,
                 "openConversationId": self.open_conversation_id,
-                "msgKey": "sampleText",
-                "msgParam": json.dumps({"content": content}, ensure_ascii=False),
+                "msgKey": "sampleMarkdown",
+                "msgParam": json.dumps({"title": "消息通知", "text": content}, ensure_ascii=False),
             },
             timeout=10,
         )
@@ -266,8 +328,61 @@ class DingTalkChannel(NotificationChannel):
             logger.error(f"[DingTalk] 测试发送失败: {e}")
             return False
 
+    @staticmethod
+    def _clean_thinking_chain(text: str) -> str:
+        """清理 AI 回复中的思考链标记，只保留面向用户的最终内容。
+
+        去除以下内部标记：
+        - **Plan（规划）**: / **Observe（观察）**: 等阶段标记行及其后续分析
+        - **最终回复**: 标记行
+        - 💡 分析：... 行
+        - 🔍 Observe — 第 N 轮 等循环提示
+        """
+        import re as _re
+
+        if not text:
+            return text
+
+        lines = text.split("\n")
+        cleaned: list[str] = []
+        skip_until_blank = False
+
+        for line in lines:
+            stripped = line.strip()
+
+            # 跳过思考链阶段标记行及其后续内容（直到遇到空行）
+            if _re.match(r'\*{0,2}Plan[（(]规划[）)]', stripped, _re.IGNORECASE):
+                skip_until_blank = True
+                continue
+            if _re.match(r'\*{0,2}Observe[（(]观察[）)]', stripped, _re.IGNORECASE):
+                skip_until_blank = True
+                continue
+            # 跳过 "最终回复" 标记行本身（但保留后续内容）
+            if _re.match(r'\*{0,2}最终回复\*{0,2}\s*[:：]?\s*$', stripped):
+                skip_until_blank = False
+                continue
+            # 跳过 💡 分析行
+            if stripped.startswith("💡 分析") or stripped.startswith("💡 分析"):
+                continue
+            # 跳过 🔍 Observe 循环提示
+            if stripped.startswith("🔍 Observe"):
+                continue
+
+            # 遇到空行时停止跳过
+            if skip_until_blank:
+                if not stripped:
+                    skip_until_blank = False
+                continue
+
+            cleaned.append(line)
+
+        result = "\n".join(cleaned).strip()
+        # 清理多余空行
+        result = _re.sub(r'\n{3,}', '\n\n', result)
+        return result
+
     def _format_message(self, data: dict) -> str:
-        """将通知数据格式化为文本消息"""
+        """将通知数据格式化为文本消息（自动清理思考链标记）"""
         msg_type = data.get("type")
         if msg_type in ["schedule_reminder", "daily_briefing"]:
             return data.get("result", "")
@@ -275,6 +390,10 @@ class DingTalkChannel(NotificationChannel):
         task_name = data.get("task_name", "未知任务")
         result = data.get("result", "")
         time_str = data.get("time", "")
+
+        # 清理思考链标记
+        result = self._clean_thinking_chain(result)
+
         return f"📋 定时任务提醒\n\n🏷 任务: {task_name}\n🕐 时间: {time_str}\n\n{result}"
 
     def _get_access_token(self) -> str:

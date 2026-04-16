@@ -9,6 +9,10 @@ build/
 .venv/
 venv/
 env/
+Lib/
+Scripts/
+share/
+pyvenv.cfg
 
 # ===== 敏感配置文件（含 API Key / AK/SK）=====
 backend/secrets.json
@@ -19,9 +23,13 @@ data/memory/
 data/covers/
 data/lyrics/
 data/temp/
+data/upload_temp/
+data/knowledge_base/
 data/minio_index.json
 data/tasks.json
 *.db
+*.db-shm
+*.db-wal
 
 # ===== 测试/调试临时文件 =====
 mcp_test_output.txt
