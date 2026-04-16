@@ -1,8 +1,13 @@
 """
-volcengine_service.py — 火山引擎即梦 (Jimeng) AI 图片/视频生成服务
+volcengine_jimeng.py — 火山引擎即梦 (Jimeng) AI 图片/视频生成服务
 
-使用官方 volcengine Python SDK 的 VisualService 进行 HMAC-SHA256 签名鉴权,
-对接即梦系列 API（同步转异步模式: 提交任务 → 轮询查询 → 获取结果）。
+远程服务：通过火山引擎 VisualService SDK (HMAC-SHA256 签名鉴权) 调用即梦 API。
+工作模式：同步转异步（提交任务 → 轮询查询 → 获取结果）。
+
+提供：
+  - JimengService: 即梦服务客户端
+  - JIMENG_TOOL_DEFS: OpenAI function 工具定义列表
+  - execute_jimeng(): 异步工具执行入口
 """
 import json
 import time
@@ -117,14 +122,12 @@ class JimengService:
             data = resp.get("data")
 
             if code != 10000:
-                # 非成功状态码，可能是还在处理，也可能已失败
                 msg = resp.get("message", "未知错误")
                 if data and isinstance(data, dict):
                     status = data.get("status", "")
                     if status in ("in_queue", "generating"):
                         print(f"[Jimeng] 任务 {task_id} 状态: {status} ({elapsed}s)")
                         continue
-                # 其他错误直接返回
                 return resp
 
             if data and isinstance(data, dict):
@@ -174,7 +177,6 @@ class JimengService:
         if use_pre_llm is not None:
             body["use_pre_llm"] = use_pre_llm
 
-        # 提交任务
         submit_resp = self._submit_task(body)
         if submit_resp.get("code") != 10000:
             return {
@@ -186,7 +188,6 @@ class JimengService:
         task_id = submit_resp["data"]["task_id"]
         print(f"[Jimeng] 图片任务已提交: {task_id} (req_key={req_key})")
 
-        # 等待结果  (图片通常 20-60s)
         result = self._wait_for_result(req_key, task_id, max_wait=120, interval=3)
 
         if result.get("code") == 10000 and result.get("data", {}).get("status") == "done":
@@ -224,11 +225,9 @@ class JimengService:
 
         if image_urls:
             body["image_urls"] = image_urls
-        # aspect_ratio 只在文生视频或 Pro 下有效
         if req_key in ("jimeng_t2v_v30_1080p", "jimeng_ti2v_v30_pro"):
             body["aspect_ratio"] = aspect_ratio
 
-        # 提交任务
         submit_resp = self._submit_task(body)
         if submit_resp.get("code") != 10000:
             return {
@@ -240,7 +239,6 @@ class JimengService:
         task_id = submit_resp["data"]["task_id"]
         print(f"[Jimeng] 视频任务已提交: {task_id} (req_key={req_key})")
 
-        # 等待结果 (视频通常 1-5min)
         result = self._wait_for_result(req_key, task_id, max_wait=360, interval=5)
 
         if result.get("code") == 10000 and result.get("data", {}).get("status") == "done":
@@ -257,6 +255,125 @@ class JimengService:
                 "message": result.get("message", "生成失败"),
                 "request_id": result.get("request_id", ""),
             }
+
+
+# ====== OpenAI function 工具定义 ======
+
+JIMENG_TOOL_DEFS: list[dict] = [
+    {
+        "type": "function",
+        "function": {
+            "name": "jimeng_image_generation",
+            "description": "使用火山引擎即梦 AI 生成图片。支持文生图和图生图。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prompt": {"type": "string", "description": "图片描述提示词，中英文均可。建议120字以内。"},
+                    "model": {"type": "string", "description": "模型版本。可选: v30(3.0文生图), i2i_v30(3.0图生图), v40(4.0统一版)。默认v30。"},
+                    "image_urls": {"type": "array", "items": {"type": "string"}, "description": "参考图片URL列表，用于图生图场景。"},
+                    "width": {"type": "integer", "description": "生成图片宽度，需与height同时传入。推荐1328。"},
+                    "height": {"type": "integer", "description": "生成图片高度，需与width同时传入。推荐1328。"},
+                    "scale": {"type": "number", "description": "文本影响程度(0-1)，仅图生图有效。默认0.5。"},
+                },
+                "required": ["prompt"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "jimeng_video_generation",
+            "description": "使用火山引擎即梦 AI 生成视频。支持文生视频和图生视频。注意：耗时1-5分钟。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prompt": {"type": "string", "description": "视频描述提示词，中英文均可。建议400字以内。"},
+                    "model": {"type": "string", "description": "模型版本。可选: v30(3.0文/图生视频), pro(3.0Pro)。默认v30。"},
+                    "image_urls": {"type": "array", "items": {"type": "string"}, "description": "参考图片URL。1张=首帧，2张=首尾帧。"},
+                    "frames": {"type": "integer", "description": "视频帧数。121=5秒，241=10秒。默认121。"},
+                    "aspect_ratio": {"type": "string", "description": "视频宽高比。可选: 16:9, 4:3, 1:1, 3:4, 9:16, 21:9。默认16:9。"},
+                },
+                "required": ["prompt"]
+            }
+        }
+    },
+]
+
+
+# ====== 异步工具执行入口 ======
+
+async def execute_jimeng(tool_name: str, args: dict) -> str:
+    """执行即梦 AI 图片/视频生成工具（供 MCPManager 调用）。"""
+    prompt = args.get("prompt", "")
+    if not prompt:
+        return "Error: 缺少必要参数 prompt"
+
+    if tool_name == "jimeng_image_generation":
+        model = args.get("model", "v30")
+        req_key_map = {
+            "v30": "jimeng_t2i_v30",
+            "i2i_v30": "jimeng_i2i_v30",
+            "v40": "jimeng_t2i_v40",
+        }
+        req_key = req_key_map.get(model, "jimeng_t2i_v30")
+
+        image_urls = args.get("image_urls")
+        if image_urls and model == "v30":
+            req_key = "jimeng_i2i_v30"
+
+        kwargs: dict = {"prompt": prompt, "req_key": req_key}
+        if image_urls:
+            kwargs["image_urls"] = image_urls
+        if args.get("width") and args.get("height"):
+            kwargs["width"] = args["width"]
+            kwargs["height"] = args["height"]
+        if args.get("scale") is not None:
+            kwargs["scale"] = args["scale"]
+
+        print(f"[Jimeng] 执行图片生成: req_key={req_key}, prompt={prompt[:50]}")
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, lambda: jimeng_service.generate_image(**kwargs))
+
+        if result["status"] == "ok":
+            urls = result.get("image_urls", [])
+            if urls:
+                url_list = "\n".join(urls)
+                return f"✅ 即梦图片生成成功！\n生成了 {len(urls)} 张图片:\n{url_list}"
+            return "✅ 即梦图片生成完成，但未返回图片URL。"
+        return f"❌ 即梦图片生成失败: {result.get('message', '未知错误')}"
+
+    elif tool_name == "jimeng_video_generation":
+        model = args.get("model", "v30")
+        image_urls = args.get("image_urls")
+
+        if model == "pro":
+            req_key = "jimeng_ti2v_v30_pro"
+        elif image_urls:
+            req_key = "jimeng_i2v_first_tail_v30_1080" if len(image_urls) >= 2 else "jimeng_i2v_first_v30_1080"
+        else:
+            req_key = "jimeng_t2v_v30_1080p"
+
+        kwargs = {
+            "prompt": prompt,
+            "req_key": req_key,
+            "frames": args.get("frames", 121),
+            "aspect_ratio": args.get("aspect_ratio", "16:9"),
+        }
+        if image_urls:
+            kwargs["image_urls"] = image_urls
+
+        print(f"[Jimeng] 执行视频生成: req_key={req_key}, prompt={prompt[:50]}")
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, lambda: jimeng_service.generate_video(**kwargs))
+
+        if result["status"] == "ok":
+            video_url = result.get("video_url", "")
+            if video_url:
+                return f"✅ 即梦视频生成成功！\n视频链接（1小时有效）: {video_url}"
+            return "✅ 即梦视频生成完成，但未返回视频URL。"
+        return f"❌ 即梦视频生成失败: {result.get('message', '未知错误')}"
+
+    return f"Error: 未知的即梦工具 {tool_name}"
 
 
 # 单例

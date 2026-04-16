@@ -12,8 +12,8 @@ from datetime import datetime
 from typing import Optional, Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from backend.integrations.notification_manager import NotificationManager  # type: ignore[import]
-    from backend.integrations.mcp_manager import MCPManager  # type: ignore[import]
+    from backend.integrations.messaging import NotificationManager  # type: ignore[import]
+    from backend.integrations.mcp import MCPManager  # type: ignore[import]
 
 from apscheduler.schedulers.background import BackgroundScheduler  # type: ignore[import]
 from apscheduler.triggers.date import DateTrigger  # type: ignore[import]

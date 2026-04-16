@@ -30,13 +30,13 @@ from backend.config import (  # type: ignore[import]
 from backend.ai.session_manager import SessionManager  # type: ignore[import]
 from backend.ai.rag_engine import RAGEngine  # type: ignore[import]
 from backend.scheduling.task_scheduler import TaskScheduler  # type: ignore[import]
-from backend.integrations.notification_manager import (  # type: ignore[import]
+from backend.integrations.messaging import (  # type: ignore[import]
     NotificationManager, WebSocketChannel, DingTalkChannel,
 )
-from backend.integrations.dingtalk_handler import DingTalkChatHandler  # type: ignore[import]
+from backend.integrations.messaging import DingTalkChatHandler  # type: ignore[import]
 from backend.ai.memory_worker import DailyMemoryWorker  # type: ignore[import]
 from backend.file_storage import MinIOManager  # type: ignore[import]
-from backend.integrations.mcp_manager import mcp_mgr  # type: ignore[import]
+from backend.integrations.mcp import mcp_mgr  # type: ignore[import]
 from backend.scheduling.schedule_manager import ScheduleManager  # type: ignore[import]
 
 

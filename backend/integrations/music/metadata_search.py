@@ -223,7 +223,7 @@ def _search_lyrics_netease(title: str, artist: str) -> Optional[str]:
 def _mcp_search(query: str) -> list[dict]:
     """通过 MCP 智谱搜索执行联网搜索，返回结构化结果列表。"""
     try:
-        from backend.integrations.mcp_manager import mcp_mgr  # type: ignore[import]
+        from backend.integrations.mcp import mcp_mgr  # type: ignore[import]
     except ImportError:
         logger.warning("[MusicSearch] 无法导入 mcp_manager")
         return []
@@ -368,7 +368,7 @@ def search_music_metadata(
 
     # ── Step 2.5: Last.fm 社区标签 ──
     try:
-        from backend.integrations.lastfm_client import get_music_tags  # type: ignore[import]
+        from backend.integrations.music.lastfm_client import get_music_tags  # type: ignore[import]
         print(f"[LastFM] 开始获取标签: {search_artist} - {search_title}")
         lastfm_tags = get_music_tags(artist=search_artist, track=search_title)
         if lastfm_tags:

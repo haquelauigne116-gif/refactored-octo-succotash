@@ -143,7 +143,7 @@ class MinIOManager:
             # 2. 联网搜索补充音乐元信息 + 歌词
             if file_meta.get("file_type") == "audio":
                 try:
-                    from backend.integrations.music_metadata_search import search_music_metadata  # type: ignore[import]
+                    from backend.integrations.music import search_music_metadata  # type: ignore[import]
                     online_meta = search_music_metadata(
                         title=file_meta.get("title", ""),
                         artists=file_meta.get("artists"),

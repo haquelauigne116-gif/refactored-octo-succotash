@@ -13,7 +13,7 @@ from typing import Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from backend.scheduling.task_scheduler import TaskScheduler
-    from backend.integrations.notification_manager import NotificationManager
+    from backend.integrations.messaging import NotificationManager
 
 from backend.config import SCHEDULE_DB, get_client, APP_SETTINGS  # type: ignore[import]
 
