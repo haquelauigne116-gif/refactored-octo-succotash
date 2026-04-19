@@ -2,12 +2,15 @@
 chcp 65001 >nul 2>&1
 cd /d "%~dp0"
 
-echo =========================================
-echo   XiaoYu AI Assistant - Starting...
-echo =========================================
+echo.
+echo  ╔═══════════════════════════════════════════╗
+echo  ║     XiaoYu AI Assistant - Launcher        ║
+echo  ╚═══════════════════════════════════════════╝
 echo.
 
-REM ---- Detect Python ----
+REM ============================================================
+REM  Phase 1: Detect Python
+REM ============================================================
 set "PY="
 
 if exist "C:\Python314\python.exe" (
@@ -33,33 +36,140 @@ if %errorlevel% equ 0 (
     )
 )
 
-echo [ERROR] Python not found! Please install Python 3.10+.
+echo  [FAIL] Python not found! Please install Python 3.10+.
 pause
 exit /b 1
 
 :py_found
-echo [OK] Python: %PY%
+echo  [  OK  ] Python .................. %PY%
 
-REM ---- Start NeteaseCloudMusicApi (optional, needs Node.js) ----
-where npx >nul 2>&1
+REM ============================================================
+REM  Phase 2: Service Health Checks
+REM ============================================================
+echo.
+echo  --- Service Health Check ---
+echo.
+
+set "ALL_OK=1"
+
+REM ---- Check MinIO (port 9000) ----
+set "MINIO_OK=0"
+tasklist /FI "IMAGENAME eq minio.exe" 2>nul | find /I "minio.exe" >nul 2>&1
 if %errorlevel% equ 0 (
-    echo [1/2] Starting NeteaseCloudMusicApi...
-    start /B npx -y NeteaseCloudMusicApi >nul 2>&1
-    echo       Netease API started in background.
+    %PY% -c "import socket; s=socket.socket(); s.settimeout(2); s.connect(('127.0.0.1',9000)); s.close(); print('ok')" >nul 2>&1
+    if %errorlevel% equ 0 (
+        set "MINIO_OK=1"
+        echo  [  OK  ] MinIO .................. running on port 9000
+    ) else (
+        echo  [ WARN ] MinIO .................. process found but port 9000 unreachable
+    )
 ) else (
-    echo [SKIP] Node.js not found, skipping NeteaseCloudMusicApi.
+    echo  [ WARN ] MinIO .................. NOT running
 )
 
-REM ---- Start backend server, then open browser after delay ----
-echo [2/2] Starting backend server...
-start /B cmd /c "timeout /t 3 /nobreak >nul & start http://127.0.0.1:8000"
+if "%MINIO_OK%"=="0" (
+    set "ALL_OK=0"
+    if exist "Z:\start.bat" (
+        echo           - Auto-starting MinIO...
+        start "MinIO" cmd /c "Z:\start.bat"
+        ping 127.0.0.1 -n 4 >nul
+        %PY% -c "import socket; s=socket.socket(); s.settimeout(3); s.connect(('127.0.0.1',9000)); s.close()" >nul 2>&1
+        if %errorlevel% equ 0 (
+            echo           - MinIO started successfully!
+            set "MINIO_OK=1"
+        ) else (
+            echo           - MinIO failed to start, file management may be unavailable.
+        )
+    ) else (
+        echo           - Z:\start.bat not found, skipping auto-start.
+    )
+)
+
+REM ---- Check NapCat (process + port 3000) ----
+set "NAPCAT_OK=0"
+tasklist /FI "IMAGENAME eq NapCatWinBootMain.exe" 2>nul | find /I "NapCatWinBootMain.exe" >nul 2>&1
+if %errorlevel% equ 0 (
+    %PY% -c "import socket; s=socket.socket(); s.settimeout(2); s.connect(('127.0.0.1',3000)); s.close()" >nul 2>&1
+    if %errorlevel% equ 0 (
+        set "NAPCAT_OK=1"
+        echo  [  OK  ] NapCat QQ Bot .......... running on port 3000
+    ) else (
+        echo  [ WARN ] NapCat QQ Bot .......... process found but port 3000 unreachable
+    )
+) else (
+    echo  [ WARN ] NapCat QQ Bot .......... NOT running
+)
+
+if "%NAPCAT_OK%"=="0" (
+    set "ALL_OK=0"
+    if exist "D:\NapCat\NapCat.44498.Shell\NapCatWinBootMain.exe" (
+        echo           - Auto-starting NapCat...
+        start "NapCat" cmd /k "chcp 65001 >nul & D:\NapCat\NapCat.44498.Shell\NapCatWinBootMain.exe"
+        ping 127.0.0.1 -n 6 >nul
+        %PY% -c "import socket; s=socket.socket(); s.settimeout(3); s.connect(('127.0.0.1',3000)); s.close()" >nul 2>&1
+        if %errorlevel% equ 0 (
+            echo           - NapCat started successfully!
+            set "NAPCAT_OK=1"
+        ) else (
+            echo           - NapCat started, but port 3000 not yet ready.
+        )
+    ) else (
+        echo           - NapCat executable not found, skipping auto-start.
+    )
+)
+
+REM ---- Check NeteaseCloudMusicApi (optional, Node.js) ----
+set "NETEASE_OK=0"
+%PY% -c "import socket; s=socket.socket(); s.settimeout(1); s.connect(('127.0.0.1',3400)); s.close()" >nul 2>&1
+if %errorlevel% equ 0 (
+    set "NETEASE_OK=1"
+    echo  [  OK  ] NeteaseCloudMusicApi ... running on port 3400
+) else (
+    where npx >nul 2>&1
+    if %errorlevel% equ 0 (
+        echo  [ INFO ] NeteaseCloudMusicApi ... starting in background...
+        start /B npx -y NeteaseCloudMusicApi >nul 2>&1
+        set "NETEASE_OK=1"
+        echo           - Netease API started.
+    ) else (
+        echo  [ SKIP ] NeteaseCloudMusicApi ... Node.js not found, skipping.
+    )
+)
+
+REM ============================================================
+REM  Phase 3: Summary & Launch
+REM ============================================================
+echo.
+echo  --- Status Summary ---
+echo.
+
+if "%MINIO_OK%"=="1" (
+    echo   √ MinIO              : Ready
+) else (
+    echo   × MinIO              : Unavailable (file management disabled)
+)
+
+if "%NAPCAT_OK%"=="1" (
+    echo   √ NapCat QQ          : Ready
+) else (
+    echo   × NapCat QQ          : Unavailable (messaging disabled)
+)
+
+if "%NETEASE_OK%"=="1" (
+    echo   √ NeteaseCloudMusic  : Ready
+) else (
+    echo   × NeteaseCloudMusic  : Unavailable (music search disabled)
+)
 
 echo.
-echo =========================================
-echo   Server: http://127.0.0.1:8000
-echo   Press Ctrl+C to stop all services.
-echo =========================================
+echo  ╔═══════════════════════════════════════════╗
+echo  ║  Server: http://127.0.0.1:8000            ║
+echo  ║  Press Ctrl+C to stop all services.       ║
+echo  ╚═══════════════════════════════════════════╝
 echo.
+
+REM ---- Open browser after a short delay ----
+start /B cmd /c "ping 127.0.0.1 -n 4 >nul & start http://127.0.0.1:8000"
 
 REM ---- Run uvicorn in foreground (logs visible, Ctrl+C to stop) ----
 %PY% -m uvicorn backend.server:app --host 0.0.0.0 --port 8000 --reload --timeout-keep-alive 300

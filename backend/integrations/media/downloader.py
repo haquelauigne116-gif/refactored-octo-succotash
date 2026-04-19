@@ -19,7 +19,7 @@ except ImportError:
 
 async def process_media_downloads(text: str, session_id: str, session_dir: str) -> str:
     """统一处理工具返回中的媒体 URL：下载图片/视频到本地 assets 并生成内联 HTML。"""
-    urls = re.findall(r'https?://[^\s"\'\\\]+', text)
+    urls = re.findall(r'https?://[^\]\s"\'\\]+', text)
     if not urls:
         return text
 

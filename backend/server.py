@@ -31,9 +31,10 @@ from backend.ai.session_manager import SessionManager  # type: ignore[import]
 from backend.ai.rag_engine import RAGEngine  # type: ignore[import]
 from backend.scheduling.task_scheduler import TaskScheduler  # type: ignore[import]
 from backend.integrations.messaging import (  # type: ignore[import]
-    NotificationManager, WebSocketChannel, DingTalkChannel,
+    NotificationManager, WebSocketChannel, QQChannel,
+    NapCatWatchdog,
 )
-from backend.integrations.messaging import DingTalkChatHandler  # type: ignore[import]
+from backend.integrations.messaging import QQChatHandler  # type: ignore[import]
 from backend.ai.memory_worker import DailyMemoryWorker  # type: ignore[import]
 from backend.file_storage import MinIOManager  # type: ignore[import]
 from backend.integrations.mcp import mcp_mgr  # type: ignore[import]
@@ -62,6 +63,8 @@ client = get_client(current_provider_id)
 ws_clients: set[WebSocket] = set()
 _event_loop = None  # 主事件循环引用
 notification_mgr: NotificationManager | None = None  # 多通道通知管理器
+qq_chat_handler: QQChatHandler | None = None  # QQ 聊天处理器（供 /ws/qq 使用）
+napcat_watchdog: NapCatWatchdog | None = None  # NapCat 连接/登录守护
 
 async def broadcast(data: dict):
     """向所有连接的 WebSocket 客户端广播消息"""
@@ -84,7 +87,7 @@ def broadcast_sync(data: dict):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期：启动时开启调度器和通知通道，关闭时停止"""
-    global _event_loop, notification_mgr
+    global _event_loop, notification_mgr, qq_chat_handler, napcat_watchdog
     _event_loop = asyncio.get_running_loop()
 
     # 初始化多通道通知管理器
@@ -100,26 +103,46 @@ async def lifespan(app: FastAPI):
     ws_channel.set_broadcast_fn(broadcast_sync)
     notification_mgr.add_channel(ws_channel)
 
-    # 钉钉通道 + 聊天处理器
-    dt_cfg = channels_cfg.get("dingtalk", {})
-    dt_channel = DingTalkChannel(
-        app_key=dt_cfg.get("app_key", ""),
-        app_secret=dt_cfg.get("app_secret", ""),
-        agent_id=dt_cfg.get("agent_id", ""),
-        robot_code=dt_cfg.get("robot_code", ""),
-        open_conversation_id=dt_cfg.get("open_conversation_id", ""),
-        user_ids=dt_cfg.get("user_ids", []),
-        msg_type=dt_cfg.get("msg_type", "single"),
-        enabled=dt_cfg.get("enabled", False),
+
+
+    # QQ 通道 (NapCat / OneBot 11)
+    qq_cfg = channels_cfg.get("qq", {})
+    qq_channel = QQChannel(
+        napcat_http_url=qq_cfg.get("napcat_http_url", "http://127.0.0.1:3000"),
+        napcat_token=qq_cfg.get("napcat_token", ""),
+        msg_type=qq_cfg.get("msg_type", "private"),
+        target_user_ids=qq_cfg.get("target_user_ids", []),
+        target_group_ids=qq_cfg.get("target_group_ids", []),
+        enabled=qq_cfg.get("enabled", False),
     )
-    notification_mgr.add_channel(dt_channel)
+    notification_mgr.add_channel(qq_channel)
 
-    # 创建钉钉聊天处理器并注入
-    dingtalk_chat_handler = DingTalkChatHandler(rag=rag, minio_mgr=minio_mgr)
-    dingtalk_chat_handler.set_task_scheduler(task_scheduler)
+    # 创建 QQ 聊天处理器并注入
+    qq_chat_handler = QQChatHandler(rag=rag, minio_mgr=minio_mgr)
+    qq_chat_handler.set_task_scheduler(task_scheduler)
+    qq_chat_handler.set_qq_channel(qq_channel)
 
-    # 启动所有通道（传入聊天处理器）
-    notification_mgr.start(chat_handler=dingtalk_chat_handler)
+    # NapCat 守护进程 — 监控 WebSocket 心跳 + QQ 登录状态
+    def _watchdog_alert(level: str, message: str):
+        """守护告警 → WebSocket 广播 + 日志"""
+        broadcast_sync({"type": "napcat_alert", "level": level, "message": message})
+
+    napcat_watchdog = NapCatWatchdog(
+        napcat_http_url=qq_cfg.get("napcat_http_url", "http://127.0.0.1:3000"),
+        napcat_token=qq_cfg.get("napcat_token", ""),
+        heartbeat_timeout=90,
+        login_check_interval=60,
+        napcat_cmd=r"D:\NapCat\NapCat.44498.Shell\NapCatWinBootMain.exe",
+        max_restart_attempts=5,
+        restart_cooldown=600,
+        on_alert=_watchdog_alert,
+    )
+    if qq_cfg.get("enabled", False):
+        napcat_watchdog.start()
+        print("[System] NapCat 守护进程已启动 (心跳监控 + 登录检测)")
+
+    # 启动所有通道
+    notification_mgr.start()
 
     # 注入到任务调度器
     task_scheduler.notification_manager = notification_mgr
@@ -162,6 +185,8 @@ async def lifespan(app: FastAPI):
 
     task_scheduler.shutdown()
     notification_mgr.shutdown()
+    if napcat_watchdog:
+        napcat_watchdog.stop()
     _event_loop = None
 
 app = FastAPI(lifespan=lifespan)
@@ -279,7 +304,8 @@ def update_system_settings(req: SettingsUpdateRequest):
         APP_SETTINGS["file_vision_model"] = req.file_vision_model
     APP_SETTINGS["task_provider"] = req.task_provider
     APP_SETTINGS["task_model"] = req.task_model
-    APP_SETTINGS["bailian_api_key"] = req.bailian_api_key
+    if req.bailian_api_key:
+        APP_SETTINGS["bailian_api_key"] = req.bailian_api_key
     APP_SETTINGS["enable_mcp_for_chat"] = req.enable_mcp_for_chat
     APP_SETTINGS["max_tool_loops"] = max(1, min(req.max_tool_loops, 20))  # 限制范围 1-20
     save_settings(APP_SETTINGS)
@@ -551,6 +577,13 @@ def chat_with_ai(request: ChatRequest):
         mcp_intent = intent.get("mcp_intent", "NONE")
         mcp_tools = mcp_mgr.get_all_tools_for_loop(mcp_intent)
         current_messages = list(ai_messages)
+
+        # 注入当前时间（让 AI 知道现在几点）
+        _now_str = _dt.now().strftime("%Y年%m月%d日 %H:%M（%A）")
+        current_messages.insert(1, {
+            "role": "system",
+            "content": f"当前时间：{_now_str}",
+        })
 
         # ====== Plan-Act-Observe 循环配置 ======
         MAX_LOOPS = int(APP_SETTINGS.get("max_tool_loops", 6))
@@ -1674,6 +1707,57 @@ async def websocket_endpoint(ws: WebSocket):
         print(f"[WS] 客户端断开，剩余 {len(ws_clients)} 个")
     except Exception:
         ws_clients.discard(ws)
+
+
+# ====== QQ (NapCat) 反向 WebSocket 端点 ======
+
+@app.websocket("/ws/qq")
+async def qq_websocket_endpoint(ws: WebSocket):
+    """接收 NapCat 反向 WebSocket 推送的 OneBot 11 事件"""
+    await ws.accept()
+    print("[QQ] NapCat 反向 WebSocket 已连接")
+
+    # 通知守护进程：连接已建立
+    if napcat_watchdog:
+        napcat_watchdog.report_ws_connect()
+
+    try:
+        while True:
+            raw = await ws.receive_text()
+
+            # 每收到任意消息都刷新心跳
+            if napcat_watchdog:
+                napcat_watchdog.report_heartbeat()
+
+            try:
+                import json as _json_qq
+                event = _json_qq.loads(raw)
+            except Exception:
+                continue
+
+            # 处理 OneBot 11 事件
+            handler = qq_chat_handler
+            if handler is not None:
+                try:
+                    await handler.handle_onebot_event(event)
+                except Exception as e:
+                    print(f"[QQ] 事件处理异常: {e}")
+    except WebSocketDisconnect:
+        print("[QQ] NapCat 反向 WebSocket 已断开")
+        if napcat_watchdog:
+            napcat_watchdog.report_ws_disconnect()
+    except Exception as e:
+        print(f"[QQ] WebSocket 异常: {e}")
+        if napcat_watchdog:
+            napcat_watchdog.report_ws_disconnect()
+
+
+@app.get("/api/qq/status")
+def get_qq_status():
+    """获取 NapCat / QQ 连接状态"""
+    if napcat_watchdog is None:
+        return {"status": "disabled", "message": "NapCat 守护未启用"}
+    return {"status": "ok", **napcat_watchdog.get_status()}
 
 
 # ====== 静态文件挂载（放在最后，避免拦截 API 路由） ======

@@ -210,12 +210,13 @@ class FileIndex:
         return int(max_id) + 1
 
     def build_tag_pool(self) -> dict[str, list[str]]:
-        """汇总所有文件的 categorized_tags → 全局标签池"""
-        pool: dict[str, set[str]] = {
-            "file_type": set(),
-            "author": set(),
-            "location": set(),
-            "description": set(),
+        """汇总所有文件的 categorized_tags → 全局标签池 (限制数量，按频率排序)"""
+        from collections import Counter
+        pool: dict[str, Counter] = {
+            "file_type": Counter(),
+            "author": Counter(),
+            "location": Counter(),
+            "description": Counter(),
         }
         with self._lock:
             rows = self._conn.execute(
@@ -226,16 +227,29 @@ class FileIndex:
             for cat in pool:
                 for tag in cats.get(cat, []):
                     if tag:
-                        pool[cat].add(tag)
-        return {cat: sorted(tags) for cat, tags in pool.items()}
+                        pool[cat][tag] += 1
+                        
+        # 限制各个类别的最大标签数量，避免超过 LLM 上下文
+        limits = {
+            "file_type": 50,
+            "author": 200,
+            "location": 100,
+            "description": 200,
+        }
+        
+        return {
+            cat: [t for t, _ in counter.most_common(limits[cat])] 
+            for cat, counter in pool.items()
+        }
 
     def build_music_tag_pool(self) -> dict[str, list[str]]:
-        """仅从音频文件汇总 categorized_tags → 音乐专用标签池"""
-        pool: dict[str, set[str]] = {
-            "file_type": set(),
-            "author": set(),
-            "location": set(),
-            "description": set(),
+        """仅从音频文件汇总 categorized_tags → 音乐专用标签池 (限制数量，按频率排序)"""
+        from collections import Counter
+        pool: dict[str, Counter] = {
+            "file_type": Counter(),
+            "author": Counter(),
+            "location": Counter(),
+            "description": Counter(),
         }
         with self._lock:
             rows = self._conn.execute(
@@ -254,8 +268,19 @@ class FileIndex:
             for cat in pool:
                 for tag in cats.get(cat, []):
                     if tag:
-                        pool[cat].add(tag)
-        return {cat: sorted(tags) for cat, tags in pool.items()}
+                        pool[cat][tag] += 1
+                        
+        limits = {
+            "file_type": 50,
+            "author": 200,
+            "location": 100,
+            "description": 200,
+        }
+        
+        return {
+            cat: [t for t, _ in counter.most_common(limits[cat])] 
+            for cat, counter in pool.items()
+        }
 
     def get_unmigrated(self) -> list[tuple[str, dict]]:
         """获取需要迁移标签分类的条目（有 tags 但无 categorized_tags）"""

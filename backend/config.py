@@ -167,18 +167,17 @@ def load_lastfm_config() -> dict:
 _DEFAULT_NOTIFICATION_CONFIG: dict = {
     "channels": {
         "websocket": {"enabled": True},
-        "dingtalk": {
+        "qq": {
             "enabled": False,
-            "app_key": "",
-            "app_secret": "",
-            "agent_id": "",
-            "robot_code": "",
-            "msg_type": "single",
-            "user_ids": [],
-            "open_conversation_id": "",
+            "napcat_http_url": "http://127.0.0.1:3000",
+            "napcat_token": "",
+            "msg_type": "private",
+            "target_user_ids": [],
+            "target_group_ids": [],
         },
     }
 }
+
 
 def load_notification_config() -> dict:
     """加载通知通道配置，缺失项用默认值填充"""
