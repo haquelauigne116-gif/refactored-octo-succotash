@@ -170,15 +170,24 @@ class RAGEngine:
         weekday = weekday_names[datetime.now().weekday()]
 
         system_prompt = (
-            "你是一个多功能意图分析专家。请阅读对话上下文，同时完成以下三个判断：\n\n"
+            "你是一个多功能意图分析专家。请阅读对话上下文，同时完成以下五个判断：\n\n"
             "【判断1 - 知识库检索】\n"
             "用户最新的话是否需要查阅资料？\n"
             "- 如果只是闲聊（打招呼、道谢等），输出：RAG: NONE\n"
             "- 如果需要查资料，结合上下文还原代词，提取 3-5 个核心搜索关键词，输出：RAG: 关键词1 关键词2 关键词3\n\n"
-            "【判断2 - 定时任务】\n"
-            "用户是否在请求设置定时提醒、闹钟或定时任务？\n"
+            "【判断2 - 定时任务（提醒/闹钟/定时执行）】\n"
+            "用户是否在请求设置 **到点提醒、闹钟、定时执行某操作** ？\n"
+            "关键词：'提醒我'、'叫我'、'到时候通知'、'闹钟'、'定时'\n"
+            "✅ 属于判断2的举例：\n"
+            "  - '30分钟后提醒我喝水' → date, 一次性提醒\n"
+            "  - '每天早上9点提醒起床' → cron, 循环提醒\n"
+            "  - '每隔1小时提醒喝水' → interval, 间隔提醒\n"
+            "  - '明天下午3点叫我开会' → date, 一次性提醒\n"
+            "❌ 不属于判断2的举例（应归入判断5日程）：\n"
+            "  - '明天下午2点到3点有个会议' → 日程（有起止时间的事件）\n"
+            "  - '周五全天团建活动' → 日程（全天事件）\n\n"
             "- 如果没有涉及，输出：TASK: NONE\n"
-            "- 如果有，输出 TASK: 后跟 JSON，格式如下：\n"
+            "- 如果有，输出 TASK: 后跟**单行** JSON，格式如下：\n"
             'TASK: {"task_name": "简短名≤15字", "trigger_type": "date|interval|cron", '
             '"trigger_args": {...}, "action_prompt": "到时间后要做什么"}\n\n'
             "【判断3 - 查找文件】\n"
@@ -193,10 +202,22 @@ class RAGEngine:
             "- 需要联网查询最新新闻资讯或实时信息（如“今天有什么新闻”、“搜索一下XXX”）：MCP: WEB_SEARCH\n"
             "- 明确要求把文字合成语音发出来或朗读文字（如“朗读这句话”、“转成语音”）：MCP: TTS\n"
             "- 其他所有情况（不需要以上五种服务，或仅是正常文本聊天、知识库聊天）：MCP: NONE\n\n"
-            "【判断5 - 日程管理】\n"
-            "用户是否在创建、修改或查询日程、会议、活动、安排？（注意：定时提醒属于判断2，日程是有起止时间的事件）\n"
+            "【判断5 - 日程管理（有起止时间的事件/活动/会议/行程）】\n"
+            "用户是否在陈述、创建或记录一个 **有起止时间的事件** （即使没有明确的祈使动词，只要提到了具体时间段和将要发生的事，就应该记录为日程）？\n"
+            "关键词或特征：包含具体时间（日期/时刻）以及要发生的非重复性事件。\n"
+            "✅ 属于判断5的举例（包含隐式陈述）：\n"
+            "  - '明天下午2点到3点在会议室开会' → 明确日程\n"
+            "  - '下周二上午10点体检' → 隐式日程（无创建动词，但陈述了明确的时间事件）\n"
+            "  - '5月1号全天在奥体中心看漫展' → 日程事件\n"
+            "❌ 不属于判断5的举例（应归入判断2定时任务）：\n"
+            "  - '30分钟后提醒我' → 定时提醒\n"
+            "  - '每天早上叫我起床' → 定时任务\n\n"
+            "⚠️ **互斥规则（极其重要）**：判断2和判断5不能同时触发！\n"
+            "  - 如果判定为判断2（TASK），则判断5必须输出 SCHEDULE: NONE\n"
+            "  - 如果判定为判断5（SCHEDULE），则判断2必须输出 TASK: NONE\n"
+            "  - 判断依据：用户的核心意图是 **到点提醒/执行** 还是 **记录一个有时间段的事件**\n\n"
             "- 如果没有涉及日程，输出：SCHEDULE: NONE\n"
-            "- 如果用户要创建日程，输出 SCHEDULE: 后跟 JSON，格式：\n"
+            "- 如果用户要创建日程，输出 SCHEDULE: 后跟**单行** JSON，格式：\n"
             'SCHEDULE: {"action": "create", "title": "简短标题", "start_time": "YYYY-MM-DDTHH:MM:SS", '
             '"end_time": "YYYY-MM-DDTHH:MM:SS", "category": "工作|个人|学习|会议|健康|其他", '
             '"location": "地点或空", "all_day": false}\n'
@@ -207,16 +228,17 @@ class RAGEngine:
             "- interval（循环间隔）：「每隔30分钟提醒一次」「每小时提醒喝水」→ 定期重复\n"
             "- cron（每天/每周固定时间）：「每天早上9点提醒」「工作日下午6点提醒下班」→ 日历规律\n\n"
             "trigger_args 规则：\n"
-            '- date → {"run_date": "YYYY-MM-DD HH:MM:SS"}（根据当前时间计算）\n'
+            '- date → {"run_date": "YYYY-MM-DD HH:MM:SS", "relative_minutes": N}'
+            '（run_date 是根据当前时间计算出的绝对时间；relative_minutes 是用户说的相对分钟数，如"30分钟后"则填30，没有相对表述则不填此字段）\n'
             '- interval → {"seconds": N} 或 {"minutes": N} 或 {"hours": N}\n'
             '- cron → {"hour": "H", "minute": "M"} 可选 "day_of_week": "mon-fri"\n\n'
             f"当前时间: {now_str}（{weekday}）\n\n"
-            "【输出格式】严格输出五行，不要有任何其他内容：\n"
+            "【输出格式】严格输出五行，每行一个判断结果，不要有任何其他内容：\n"
             "RAG: 关键词或NONE\n"
-            "TASK: JSON或NONE\n"
+            "TASK: 单行JSON或NONE\n"
             "FILE_SEARCH: 查找描述或NONE\n"
             "MCP: Z_IMAGE/JIMENG/AMAP/WEB_SEARCH/TTS/NONE\n"
-            "SCHEDULE: JSON或NONE"
+            "SCHEDULE: 单行JSON或NONE"
         )
 
         try:
@@ -233,84 +255,91 @@ class RAGEngine:
             answer = resp.choices[0].message.content.strip()
             print(f"[IntentAnalysis] 原始输出: {answer[:300]}")
 
-            # 解析 RAG 行
+            # 先按标签分段收集（支持多行 JSON）
+            label_order = ["RAG", "TASK", "FILE_SEARCH", "MCP", "SCHEDULE"]
+            sections: dict[str, str] = {}
+            current_label = None
+            current_buf: list[str] = []
+
             for line in answer.split("\n"):
-                line = line.strip()
-                if line.upper().startswith("RAG:"):
-                    rag_val = line[4:].strip()
-                    if rag_val.upper() != "NONE":
-                        result["rag_query"] = rag_val
-                        print(f"[IntentAnalysis] RAG 关键词: {rag_val}")
-                    else:
-                        print("[IntentAnalysis] RAG: 不需要检索")
+                stripped = line.strip()
+                matched_label = None
+                for lbl in label_order:
+                    if stripped.upper().startswith(lbl + ":"):
+                        matched_label = lbl
+                        break
+                if matched_label:
+                    if current_label is not None:
+                        sections[current_label] = "\n".join(current_buf).strip()
+                    current_label = matched_label
+                    colon_pos = stripped.upper().index(matched_label + ":") + len(matched_label) + 1
+                    current_buf = [stripped[colon_pos:].strip()]
+                elif current_label is not None:
+                    current_buf.append(stripped)
+            if current_label is not None:
+                sections[current_label] = "\n".join(current_buf).strip()
 
-                elif line.upper().startswith("TASK:"):
-                    task_val = line[5:].strip()
-                    if task_val.upper() == "NONE":
-                        print("[IntentAnalysis] TASK: 无任务意图")
-                    else:
-                        try:
-                            # 兼容 markdown 代码块
-                            json_text = task_val
-                            if "```" in json_text:
-                                parts = json_text.split("```")
-                                for part in parts:
-                                    s = part.strip()
-                                    if s.startswith("json"):
-                                        s = s[4:].strip()
-                                    if s.startswith("{"):
-                                        json_text = s
-                                        break
-                            task_data = json.loads(json_text)
-                            required = ["task_name", "trigger_type", "trigger_args", "action_prompt"]
-                            if all(k in task_data for k in required) and task_data["trigger_type"] in ("date", "interval", "cron"):
-                                result["task_intent"] = task_data
-                                print(f"[IntentAnalysis] ✅ 任务意图: {task_data['task_name']}")
-                            else:
-                                print(f"[IntentAnalysis] TASK JSON 字段不完整: {task_data}")
-                        except json.JSONDecodeError as e:
-                            print(f"[IntentAnalysis] TASK JSON 解析失败: {e}")
+            # 解析 RAG
+            rag_val = sections.get("RAG", "NONE").strip()
+            if rag_val.upper() != "NONE":
+                result["rag_query"] = rag_val
+                print(f"[IntentAnalysis] RAG 关键词: {rag_val}")
+            else:
+                print("[IntentAnalysis] RAG: 不需要检索")
 
-                elif line.upper().startswith("FILE_SEARCH:"):
-                    search_str = line[12:].strip()
-                    if search_str.upper() != "NONE":
-                        result["file_search_query"] = search_str
-                        print(f"[IntentAnalysis] ✅ 查找文件意图: {search_str}")
+            # 解析 TASK
+            task_val = sections.get("TASK", "NONE").strip()
+            if task_val.upper() == "NONE":
+                print("[IntentAnalysis] TASK: 无任务意图")
+            else:
+                try:
+                    json_text = self._extract_json(task_val)
+                    task_data = json.loads(json_text)
+                    required = ["task_name", "trigger_type", "trigger_args", "action_prompt"]
+                    if all(k in task_data for k in required) and task_data["trigger_type"] in ("date", "interval", "cron"):
+                        result["task_intent"] = task_data
+                        print(f"[IntentAnalysis] ✅ 任务意图: {task_data['task_name']}")
                     else:
-                        print("[IntentAnalysis] FILE_SEARCH: 无查找文件请求")
+                        print(f"[IntentAnalysis] TASK JSON 字段不完整: {task_data}")
+                except json.JSONDecodeError as e:
+                    print(f"[IntentAnalysis] TASK JSON 解析失败: {e}, 原文: {task_val[:200]}")
 
-                elif line.upper().startswith("MCP:"):
-                    mcp_val = line[4:].strip().upper()
-                    if mcp_val != "NONE":
-                        result["mcp_intent"] = mcp_val
-                        print(f"[IntentAnalysis] ✅ 检测到 MCP 意图: {mcp_val}")
-                    else:
-                        print(f"[IntentAnalysis] MCP: 不需要外部服务")
+            # 解析 FILE_SEARCH
+            search_str = sections.get("FILE_SEARCH", "NONE").strip()
+            if search_str.upper() != "NONE":
+                result["file_search_query"] = search_str
+                print(f"[IntentAnalysis] ✅ 查找文件意图: {search_str}")
+            else:
+                print("[IntentAnalysis] FILE_SEARCH: 无查找文件请求")
 
-                elif line.upper().startswith("SCHEDULE:"):
-                    sch_val = line[9:].strip()
-                    if sch_val.upper() == "NONE":
-                        print("[IntentAnalysis] SCHEDULE: 无日程意图")
+            # 解析 MCP
+            mcp_val = sections.get("MCP", "NONE").strip().upper()
+            if mcp_val != "NONE":
+                result["mcp_intent"] = mcp_val
+                print(f"[IntentAnalysis] ✅ 检测到 MCP 意图: {mcp_val}")
+            else:
+                print("[IntentAnalysis] MCP: 不需要外部服务")
+
+            # 解析 SCHEDULE
+            sch_val = sections.get("SCHEDULE", "NONE").strip()
+            if sch_val.upper() == "NONE":
+                print("[IntentAnalysis] SCHEDULE: 无日程意图")
+            else:
+                try:
+                    json_text = self._extract_json(sch_val)
+                    sch_data = json.loads(json_text)
+                    if sch_data.get("action") == "create" and "title" in sch_data and "start_time" in sch_data:
+                        result["schedule_intent"] = sch_data
+                        print(f"[IntentAnalysis] ✅ 日程意图: {sch_data['title']}")
                     else:
-                        try:
-                            json_text = sch_val
-                            if "```" in json_text:
-                                parts = json_text.split("```")
-                                for part in parts:
-                                    s = part.strip()
-                                    if s.startswith("json"):
-                                        s = s[4:].strip()
-                                    if s.startswith("{"):
-                                        json_text = s
-                                        break
-                            sch_data = json.loads(json_text)
-                            if sch_data.get("action") == "create" and "title" in sch_data and "start_time" in sch_data:
-                                result["schedule_intent"] = sch_data
-                                print(f"[IntentAnalysis] ✅ 日程意图: {sch_data['title']}")
-                            else:
-                                print(f"[IntentAnalysis] SCHEDULE JSON 字段不完整: {sch_data}")
-                        except json.JSONDecodeError as e:
-                            print(f"[IntentAnalysis] SCHEDULE JSON 解析失败: {e}")
+                        print(f"[IntentAnalysis] SCHEDULE JSON 字段不完整: {sch_data}")
+                except json.JSONDecodeError as e:
+                    print(f"[IntentAnalysis] SCHEDULE JSON 解析失败: {e}, 原文: {sch_val[:200]}")
+                    
+            # 互斥校验：如果 TASK 和 SCHEDULE 同时被识别，清除优先级较低的（此处保留 TASK）
+            if result.get("task_intent") is not None and result.get("schedule_intent") is not None:
+                print("[IntentAnalysis] ⚠️ TASK 和 SCHEDULE 同时触发，应用互斥规则，保留 TASK")
+                result["schedule_intent"] = None
 
         except Exception as e:
             print(f"[IntentAnalysis] 意图分析异常: {e}")
@@ -337,6 +366,24 @@ class RAGEngine:
             return ""
 
     # ====== 工具方法 ======
+
+    @staticmethod
+    def _extract_json(text: str) -> str:
+        """从文本中提取 JSON 字符串，兼容 markdown 代码块和多行格式"""
+        if "```" in text:
+            parts = text.split("```")
+            for part in parts:
+                s = part.strip()
+                if s.startswith("json"):
+                    s = s[4:].strip()
+                if s.startswith("{"):
+                    return s
+        brace_start = text.find("{")
+        if brace_start != -1:
+            brace_end = text.rfind("}")
+            if brace_end > brace_start:
+                return text[brace_start:brace_end + 1]
+        return text
 
     @staticmethod
     def _tokenize(text: str) -> list[str]:

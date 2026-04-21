@@ -97,7 +97,32 @@ class TaskScheduler:
         action_prompt: str,
     ) -> dict:
         """创建新定时任务"""
-        task_id = "task_" + datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + uuid.uuid4().hex[:4]  # type: ignore[index]
+        from datetime import timedelta
+        # 对 date 类型进行时间校验与纠错
+        if trigger_type == "date":
+            # 如果 AI 提供了 relative_minutes，直接由服务端计算绝对时间
+            if "relative_minutes" in trigger_args:
+                try:
+                    rel_mins = int(trigger_args["relative_minutes"])
+                    trigger_args["run_date"] = (datetime.now() + timedelta(minutes=rel_mins)).strftime("%Y-%m-%d %H:%M:%S")
+                    del trigger_args["relative_minutes"]
+                except ValueError:
+                    pass
+
+            if "run_date" in trigger_args:
+                try:
+                    # 尝试解析 run_date
+                    run_date_obj = datetime.strptime(trigger_args["run_date"], "%Y-%m-%d %H:%M:%S")
+                    if run_date_obj <= datetime.now():
+                        print(f"[Scheduler] ⚠️ 修正在过去的时间: {run_date_obj} -> 自动向后顺延 10 秒")
+                        run_date_obj = datetime.now() + timedelta(seconds=10)
+                        trigger_args["run_date"] = run_date_obj.strftime("%Y-%m-%d %H:%M:%S")
+                except ValueError:
+                    # 如果解析失败（格式不对），强制设置为 10 秒后
+                    print(f"[Scheduler] ⚠️ 无法解析的时间格式: {trigger_args['run_date']}")
+                    trigger_args["run_date"] = (datetime.now() + timedelta(seconds=10)).strftime("%Y-%m-%d %H:%M:%S")
+
+        task_id = "task_" + datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + uuid.uuid4().hex[:4]
 
         task = {
             "task_id": task_id,

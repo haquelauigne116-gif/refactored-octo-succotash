@@ -339,10 +339,28 @@ class NapCatWatchdog:
             # 启动新进程 — 需要从 exe 所在目录运行（加载 DLL），
             # 且保留控制台窗口以便用户看到二维码。
             import os
-            napcat_dir = os.path.dirname(os.path.abspath(self.napcat_cmd))
-            napcat_exe = os.path.basename(self.napcat_cmd)
+            # napcat_cmd 可能包含参数（如 "...exe 3920800540"），需拆分
+            parts = self.napcat_cmd.split(None, 1)  # 最多分两段
+            exe_path = parts[0]
+            exe_args = parts[1] if len(parts) > 1 else ""
+            napcat_dir = os.path.dirname(os.path.abspath(exe_path))
+            napcat_exe = os.path.basename(exe_path)
+
+            # 预检：确认 QQ.exe 存在于启动目录（NapCatWinBootMain 会从自身目录查找 QQ.exe）
+            qq_exe_path = os.path.join(napcat_dir, "QQ.exe")
+            if not os.path.isfile(qq_exe_path):
+                self._alert(
+                    "error",
+                    f"❌ NapCat 重启失败: QQ.exe 不存在于 {napcat_dir}，"
+                    f"请创建硬链接: mklink /H \"{qq_exe_path}\" \"<QQ安装目录>\\QQ.exe\""
+                )
+                logger.error(f"[Watchdog] QQ.exe not found at {qq_exe_path}")
+                return
+
+            full_cmd = f"{napcat_exe} {exe_args}".strip()
             # 用 cmd /k 包装，与 start.bat 中的启动方式一致
-            launch_cmd = f'start "NapCat" cmd /k "chcp 65001 >nul & cd /d {napcat_dir} & {napcat_exe}"'
+            launch_cmd = f'start "NapCat" cmd /k "chcp 65001 >nul & cd /d {napcat_dir} & {full_cmd}"'
+            logger.info(f"[Watchdog] Boot dir: {napcat_dir} | Cmd: {full_cmd}")
             subprocess.Popen(launch_cmd, shell=True)
             self._alert("info", f"✅ NapCat 进程已重新启动 (第 {attempt} 次)")
             logger.info(f"[Watchdog] NapCat 已重启 (第 {attempt} 次)")

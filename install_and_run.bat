@@ -5,6 +5,10 @@ setlocal
 
 REM ---- Detect Python ----
 set "PY="
+if exist "%~dp0Scripts\python.exe" (
+    set "PY=%~dp0Scripts\python.exe"
+    goto :py_found
+)
 if exist "C:\Python314\python.exe" (
     set "PY=C:\Python314\python.exe"
     goto :py_found
@@ -42,15 +46,5 @@ echo ===========================================
 echo Press any key to start the server now...
 pause >nul
 
-echo Starting NeteaseCloudMusicApi (Music Search Service)...
-where npx >nul 2>&1
-if %errorlevel% equ 0 (
-    start /B npx -y NeteaseCloudMusicApi >nul 2>&1
-    echo   - Netease API started in background.
-) else (
-    echo   [Warning] Node.js not installed. Music search might be unavailable.
-)
-
-echo Starting Backend Server...
-start /B cmd /c "timeout /t 3 /nobreak >nul & start http://127.0.0.1:8000"
-%PY% -m uvicorn backend.server:app --host 0.0.0.0 --port 8000
+echo Handing off to start.bat for full service orchestration...
+call "%~dp0start.bat"

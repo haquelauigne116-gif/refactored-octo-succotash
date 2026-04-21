@@ -4,13 +4,17 @@ qq_handler.py — QQ 聊天处理器 (基于 NapCat / OneBot 11 反向 WebSocket
 支持命令：-new / -history / 普通 AI 对话
 完全对标 dingtalk_handler.py 的实现。
 """
+import base64
 import json
 import logging
+import re
 from typing import Optional
+
+import requests
 
 from backend.config import (  # type: ignore[import]
     SYSTEM_PROMPT, MEMORY_FILE,
-    get_client, APP_SETTINGS,
+    get_client, get_model_caps, APP_SETTINGS,
 )
 from backend.ai.session_manager import SessionManager  # type: ignore[import]
 from backend.ai.rag_engine import RAGEngine  # type: ignore[import]
@@ -44,11 +48,16 @@ class QQChatHandler:
         self.rag = rag or RAGEngine()
         self.minio_mgr = minio_mgr
         self._task_scheduler: Optional[object] = None  # 由 server.py 注入
+        self._schedule_mgr: Optional[object] = None    # 由 server.py 注入
         self._qq_channel = None  # QQChannel 实例，用于回复消息
 
     def set_task_scheduler(self, scheduler):
         """注入任务调度器"""
         self._task_scheduler = scheduler
+
+    def set_schedule_mgr(self, mgr):
+        """注入日程管理器"""
+        self._schedule_mgr = mgr
 
     def set_qq_channel(self, channel):
         """注入 QQChannel 实例，用于主动回复"""
@@ -57,6 +66,65 @@ class QQChatHandler:
     def _get_scheduler(self):
         """获取任务调度器"""
         return self._task_scheduler
+
+    # ========== 图片处理 ==========
+
+    @staticmethod
+    def _extract_images_from_event(event: dict) -> list[dict]:
+        """
+        从 OneBot 11 事件中提取图片信息。
+
+        Returns:
+            list of {"url": str, "filename": str}
+        """
+        images: list[dict] = []
+
+        # 方法 1: 从 message segments（结构化数组）提取
+        message_segments = event.get("message", [])
+        if isinstance(message_segments, list):
+            for seg in message_segments:
+                if seg.get("type") == "image":
+                    data = seg.get("data", {})
+                    url = data.get("url", "")
+                    filename = data.get("file", "image.jpg")
+                    if url:
+                        images.append({"url": url, "filename": filename})
+
+        # 方法 2: 如结构化无结果，从 raw_message CQ 码中提取
+        if not images:
+            raw = event.get("raw_message", "")
+            for m in re.finditer(r'\[CQ:image,([^\]]+)\]', raw):
+                params = dict(re.findall(r'(\w+)=([^,\]]*)', m.group(1)))
+                url = params.get("url", "")
+                filename = params.get("file", "image.jpg")
+                if url:
+                    images.append({"url": url, "filename": filename})
+
+        return images
+
+    @staticmethod
+    def _download_image_as_base64(url: str, timeout: int = 15) -> tuple[str, str]:
+        """
+        下载图片并转为 base64。
+
+        Returns:
+            (base64_data, mime_type)  失败时返回 ("", "")
+        """
+        try:
+            # NapCat 的图片 URL 可能含有 HTML 实体编码
+            url = url.replace("&amp;", "&")
+            resp = requests.get(url, timeout=timeout)
+            resp.raise_for_status()
+            content_type = resp.headers.get("Content-Type", "image/jpeg")
+            # 取主类型
+            mime = content_type.split(";")[0].strip()
+            if not mime.startswith("image/"):
+                mime = "image/jpeg"
+            b64 = base64.b64encode(resp.content).decode("utf-8")
+            return b64, mime
+        except Exception as e:
+            logger.error(f"[QQ] 图片下载失败: {e} | url={url[:120]}")
+            return "", ""
 
     def _get_session(self, user_id: str) -> SessionManager:
         """获取或创建用户的 SessionManager"""
@@ -96,19 +164,25 @@ class QQChatHandler:
         sender = event.get("sender", {})
         sender_name = sender.get("nickname", user_id)
 
-        if not raw_message:
+        # 提取图片
+        images = self._extract_images_from_event(event)
+
+        # 从 raw_message 中移除 CQ:image 码，保留纯文本
+        text_message = re.sub(r'\[CQ:image,[^\]]*\]', '', raw_message).strip()
+
+        # 如果既没有文本也没有图片，跳过
+        if not text_message and not images:
             return
 
         logger.info(
             f"[QQ] 收到{('群' if message_type == 'group' else '私聊')}消息 "
-            f"[{sender_name}] (userId={user_id}): {raw_message[:100]}"
+            f"[{sender_name}] (userId={user_id}): {text_message[:100]}"
+            + (f" [+{len(images)}张图片]" if images else "")
         )
 
         # 群聊中需要 @机器人 才响应（检查 CQ 码中是否 at 了自己）
-        # 如果是群聊但没 @ 机器人，忽略
         self_id = event.get("self_id")
         if message_type == "group":
-            # 检查是否 @了机器人
             message_segments = event.get("message", [])
             is_at_me = False
             if isinstance(message_segments, list):
@@ -117,24 +191,22 @@ class QQChatHandler:
                         is_at_me = True
                         break
             if not is_at_me:
-                return  # 群聊中没 @ 机器人，不响应
+                return
 
-            # 从消息中去掉 @机器人 的 CQ 码
-            import re
-            raw_message = re.sub(r'\[CQ:at,qq=\d+\]\s*', '', raw_message).strip()
-            if not raw_message:
+            text_message = re.sub(r'\[CQ:at,qq=\d+\]\s*', '', text_message).strip()
+            if not text_message and not images:
                 return
 
         # 自动注册用户 ID
         self._auto_register_user(user_id)
 
         # ========== 命令分发 ==========
-        if raw_message.lower() == "-new":
+        if text_message.lower() == "-new":
             reply = self._cmd_new(user_id)
-        elif raw_message.lower() == "-history":
+        elif text_message.lower() == "-history":
             reply = self._cmd_history(user_id)
         else:
-            reply = self._chat(user_id, raw_message)
+            reply = self._chat(user_id, text_message, images=images)
 
         # 发送回复
         self._reply(message_type, user_id, group_id, reply)
@@ -199,19 +271,21 @@ class QQChatHandler:
 
         return "\n".join(lines)
 
-    def _chat(self, user_id: str, user_text: str) -> str:
+    def _chat(self, user_id: str, user_text: str, images: list[dict] | None = None) -> str:
         """普通 AI 对话（具备多轮工具调用能力的 PAO 循环）"""
         import json as _json
         import time as _time
         from datetime import datetime as _dt
         from backend.integrations.mcp import mcp_mgr
 
+        images = images or []
         sm = self._get_session(user_id)
         turn_number = sm.get_turn_number()
 
-        # --- 统一意图分析（RAG + 定时任务 + MCP） ---
-        intent = self.rag.analyze_intent(sm.messages, user_text)
-        task_intent = intent["task_intent"]
+        # --- 统一意图分析（RAG + 定时任务 + 日程 + MCP） ---
+        intent = self.rag.analyze_intent(sm.messages, user_text or "用户发送了图片")
+        task_intent = intent.get("task_intent")
+        schedule_intent = intent.get("schedule_intent")
         mcp_intent = intent.get("mcp_intent", "NONE")
 
         # --- 第一条消息时初始化文件 ---
@@ -219,15 +293,74 @@ class QQChatHandler:
             sm.initialize_file()
 
         # --- 写入用户消息 ---
-        sm.append_user_message(user_text)
+        display_text = user_text
+        if images:
+            img_label = f" [图片×{len(images)}]" if images else ""
+            display_text = (user_text or "[图片]") + img_label
+        sm.append_user_message(display_text)
 
         # 记录到 ai_context
         sm.append_ai_context({
             "turn": turn_number,
             "role": "user",
-            "content": user_text[:500],
+            "content": display_text[:500],
             "ts": _dt.now().isoformat(),
         })
+
+        # --- 下载图片（如有）并保存为本地附件供 WebUI 展示 ---
+        image_b64_list: list[dict] = []  # [{"b64": ..., "mime": ...}]
+        saved_files: list[dict] = []
+        import os as _os
+        import uuid as _uuid
+        import base64 as _base64
+        
+        assets_dir = _os.path.join(sm.session_dir, "assets")
+
+        for img in images:
+            b64, mime = self._download_image_as_base64(img["url"])
+            if b64:
+                image_b64_list.append({"b64": b64, "mime": mime})
+                logger.info(f"[QQ] 图片已下载: {img['filename']} ({mime})")
+
+                # 保存到本地 assets 目录
+                try:
+                    _os.makedirs(assets_dir, exist_ok=True)
+                    ext = _os.path.splitext(img.get("filename", ".jpg"))[1] or ".jpg"
+                    unique_name = _uuid.uuid4().hex[:8] + ext
+                    filepath = _os.path.join(assets_dir, unique_name)
+                    raw = _base64.b64decode(b64)
+                    with open(filepath, "wb") as f:
+                        f.write(raw)
+                    saved_files.append({
+                        "filename": unique_name,
+                        "original_name": img.get("filename", "image.jpg"),
+                        "mime": mime,
+                        "url": f"/api/session_asset/{sm.session_id}/{unique_name}",
+                    })
+                except Exception as e:
+                    logger.error(f"[QQ] 保存附件到本地失败: {e}")
+
+        # 记录 chat_attach 事件，使得可以在前端正确显示图片
+        if saved_files:
+            sm.append_event("chat_attach", {"files": saved_files}, after_msg_index=len(sm.messages) - 1)
+
+        # --- 确定是否使用 Vision 模型 ---
+        provider = APP_SETTINGS.get("chat_provider", "deepseek")
+        model = APP_SETTINGS.get("chat_model", "deepseek-chat")
+        model_caps = get_model_caps(provider, model)
+        has_vision = "vision" in model_caps
+
+        # 如果当前模型不支持 vision 但有图片，尝试切换到文件视觉模型
+        if image_b64_list and not has_vision:
+            vision_provider = APP_SETTINGS.get("file_vision_provider", "")
+            vision_model = APP_SETTINGS.get("file_vision_model", "")
+            if vision_provider and vision_model:
+                vision_caps = get_model_caps(vision_provider, vision_model)
+                if "vision" in vision_caps:
+                    provider = vision_provider
+                    model = vision_model
+                    has_vision = True
+                    logger.info(f"[QQ] 图片消息，切换到视觉模型: {provider}/{model}")
 
         # --- 构建 AI 消息列表 ---
         ai_messages = [m for m in sm.messages if m["role"] in ("system", "user", "assistant")]
@@ -238,6 +371,42 @@ class QQChatHandler:
             "role": "system",
             "content": f"当前时间：{now_str}",
         })
+
+        # 如果有图片且模型支持 vision，将最后一条 user 消息替换为 vision 格式
+        if image_b64_list and has_vision:
+            # 找到最后一条 user 消息并替换为 multimodal content
+            last_user_idx = None
+            for i in range(len(ai_messages) - 1, -1, -1):
+                if ai_messages[i]["role"] == "user":
+                    last_user_idx = i
+                    break
+            if last_user_idx is not None:
+                content_parts: list[dict] = []
+                text_content = user_text or "请描述这张图片"
+                content_parts.append({"type": "text", "text": text_content})
+                for img_data in image_b64_list:
+                    data_url = f"data:{img_data['mime']};base64,{img_data['b64']}"
+                    content_parts.append({
+                        "type": "image_url",
+                        "image_url": {"url": data_url}
+                    })
+                ai_messages[last_user_idx] = {"role": "user", "content": content_parts}
+                logger.info(f"[QQ] 已构建 Vision 消息: {len(image_b64_list)} 张图片")
+                # 告知模型它可以直接看到图片，不需要调用工具
+                ai_messages.append({
+                    "role": "system",
+                    "content": (
+                        "【重要】用户发送的图片已直接嵌入到上方的消息中，你可以直接看到并理解图片内容。"
+                        "请直接分析和描述图片，**绝对不要**假装调用任何'图像分析工具'或'Image Analyzer'，"
+                        "因为你本身就是一个多模态视觉模型，具备直接理解图片的能力。"
+                    )
+                })
+        elif image_b64_list and not has_vision:
+            # 无 vision 能力，提示用户
+            ai_messages.append({
+                "role": "system",
+                "content": "用户发送了图片，但当前没有可用的视觉模型。请告知用户需要在设置中配置支持视觉的模型（如 qwen-vl-plus）才能理解图片内容。"
+            })
 
         # 注入长期记忆
         memory_text = _load_memory()
@@ -286,24 +455,28 @@ class QQChatHandler:
         # 注入系统工具指引
         if all_tools:
             MAX_LOOPS = int(APP_SETTINGS.get("max_tool_loops", 6))
+            # 动态生成可用工具名单
+            tool_names = [t["function"]["name"] for t in all_tools]
+            tool_list_str = ", ".join(tool_names)
             ai_messages.insert(0, {
                 "role": "system",
                 "content": (
-                    "你拥有使用外部工具的能力。\n"
-                    "【Plan→Act→Observe 工作流】\n"
-                    "每次回复时，如果需要调用工具：\n"
-                    "1. 先进行一段简短的“💡 分析：...”\n"
-                    "2. 然后调用相应工具。\n"
+                    f"你可以通过 function call 调用以下工具（共 {len(tool_names)} 个）：{tool_list_str}\n"
+                    "【严格规则】\n"
+                    "- 只能调用上面列出的工具，绝对禁止编造或假装调用不在列表中的工具。\n"
+                    "- 如果用户的需求不需要调用工具，直接回答即可。\n"
+                    "- 图片理解是你的内置能力，不需要任何工具。\n"
+                    "【工作流】\n"
+                    "需要调用工具时，直接通过 function call 发起调用即可。\n"
                     f"最多可进行 {MAX_LOOPS} 轮工具调用。\n"
-                    "若工具生成了媒体（如画图、音乐），系统会在后台转为 CQ 码自动展现给用户，你直接总结即可，绝对不要在文本中输出 URL 或 Markdown 形式的媒体链接。"
+                    "若工具生成了媒体，系统会自动展现给用户，你直接总结即可，不要输出 URL 或 Markdown 媒体链接。"
                 )
             })
         else:
             MAX_LOOPS = 1
 
-        provider = APP_SETTINGS.get("chat_provider", "deepseek")
+        # provider 和 model 已在上方根据图片情况确定
         client = get_client(provider)
-        model = APP_SETTINGS.get("chat_model", "deepseek-chat")
 
         final_reply_texts = []
         search_res_json = None
@@ -522,5 +695,31 @@ class QQChatHandler:
                     logger.info(f"[QQ] 自动创建任务: {created['task_name']}")
             except Exception as e:
                 logger.error(f"[QQ] 自动创建任务失败: {e}")
+
+        # 自动创建日程
+        if schedule_intent and schedule_intent.get("action") == "create":
+            try:
+                schedule_mgr = self._schedule_mgr
+                if schedule_mgr:
+                    sch_data = {
+                        "title": schedule_intent["title"],
+                        "start_time": schedule_intent["start_time"],
+                        "end_time": schedule_intent.get("end_time", ""),
+                        "description": schedule_intent.get("description", ""),
+                        "category": schedule_intent.get("category", "其他"),
+                        "location": schedule_intent.get("location", ""),
+                        "all_day": schedule_intent.get("all_day", False),
+                    }
+                    # 如果没有结束时间，默认 1 小时
+                    if not sch_data["end_time"]:
+                        from datetime import datetime as _dt, timedelta as _td
+                        start = _dt.fromisoformat(sch_data["start_time"])
+                        sch_data["end_time"] = (start + _td(hours=1)).isoformat()
+                    created_sch = schedule_mgr.create(sch_data)
+                    sch_info = f"\n\n✅ 已创建日程「{created_sch['title']}」({created_sch['start_time'].replace('T', ' ')})"
+                    ai_reply += sch_info
+                    logger.info(f"[QQ] 自动创建日程: {created_sch['title']}")
+            except Exception as e:
+                logger.error(f"[QQ] 自动创建日程失败: {e}")
 
         return ai_reply.strip()

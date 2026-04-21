@@ -35,6 +35,9 @@ data/tasks.json
 mcp_test_output.txt
 test_output.json
 err.txt
+out.txt
+backend/patch_*.py
+backend/test_*.py
 
 # ===== API 文档参考（外部文档，不上传）=====
 qwqw/

@@ -120,6 +120,7 @@ async def lifespan(app: FastAPI):
     # 创建 QQ 聊天处理器并注入
     qq_chat_handler = QQChatHandler(rag=rag, minio_mgr=minio_mgr)
     qq_chat_handler.set_task_scheduler(task_scheduler)
+    qq_chat_handler.set_schedule_mgr(schedule_mgr)
     qq_chat_handler.set_qq_channel(qq_channel)
 
     # NapCat 守护进程 — 监控 WebSocket 心跳 + QQ 登录状态
@@ -132,7 +133,7 @@ async def lifespan(app: FastAPI):
         napcat_token=qq_cfg.get("napcat_token", ""),
         heartbeat_timeout=90,
         login_check_interval=60,
-        napcat_cmd=r"D:\NapCat\NapCat.44498.Shell\NapCatWinBootMain.exe",
+        napcat_cmd=r"D:\NapCat\NapCat.44498.Shell\NapCatWinBootMain.exe 3920800540",
         max_restart_attempts=5,
         restart_cooldown=600,
         on_alert=_watchdog_alert,
